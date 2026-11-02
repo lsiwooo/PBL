@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
 }
@@ -19,9 +21,11 @@ android {
         versionName = "1.0"
         val transcriptionBaseUrl = providers.gradleProperty("transcriptionApiBaseUrl").getOrElse("http://10.0.2.2:8000")
         buildConfigField("String", "TRANSCRIPTION_API_BASE_URL", "\"$transcriptionBaseUrl\"")
-        val localProperties = java.util.Properties()
+        val localProperties = Properties()
         val localPropertiesFile = rootProject.file("local.properties")
-        if (localPropertiesFile.exists()) localPropertiesFile.inputStream().use(localProperties::load)
+        if (localPropertiesFile.exists()) {
+            localPropertiesFile.inputStream().use { input -> localProperties.load(input) }
+        }
         val supabaseUrl = localProperties.getProperty("SUPABASE_URL", "")
         val supabaseKey = localProperties.getProperty("SUPABASE_ANON_KEY", "")
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")

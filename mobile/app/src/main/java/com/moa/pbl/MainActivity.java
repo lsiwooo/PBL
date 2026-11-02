@@ -85,7 +85,6 @@ public final class MainActivity extends ComponentActivity {
         Button logout = new Button(this); logout.setText("로그아웃"); logout.setOnClickListener(v -> {
             supabase.logout(); showLogin();
         }); header.addView(logout);
-        root.addView(header);
         addText("오늘의 소비를 말하면 글로 바꿔 기록합니다.", 14, 0xff727b72, false);
         recordButton = new Button(this); recordButton.setText("● 녹음 시작"); recordButton.setOnClickListener(v -> toggleRecording()); root.addView(recordButton);
         scriptField = addInput("변환된 스크립트를 확인하고 수정하세요", false);

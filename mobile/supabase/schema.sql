@@ -11,6 +11,10 @@ create index if not exists voice_entries_user_created_idx
 
 alter table public.voice_entries enable row level security;
 
+-- Keep the table off the anonymous API role and grant only app operations.
+revoke all on table public.voice_entries from anon, authenticated;
+grant select, insert on table public.voice_entries to authenticated;
+
 create policy "Users can read their own voice entries"
     on public.voice_entries for select to authenticated
     using ((select auth.uid()) = user_id);
@@ -19,6 +23,3 @@ create policy "Users can create their own voice entries"
     on public.voice_entries for insert to authenticated
     with check ((select auth.uid()) = user_id);
 
-create policy "Users can delete their own voice entries"
-    on public.voice_entries for delete to authenticated
-    using ((select auth.uid()) = user_id);

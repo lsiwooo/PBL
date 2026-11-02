@@ -19,8 +19,6 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-        val transcriptionBaseUrl = providers.gradleProperty("transcriptionApiBaseUrl").getOrElse("http://10.0.2.2:8000")
-        buildConfigField("String", "TRANSCRIPTION_API_BASE_URL", "\"$transcriptionBaseUrl\"")
         val localProperties = Properties()
         val localPropertiesFile = rootProject.file("local.properties")
         if (localPropertiesFile.exists()) {
@@ -28,8 +26,11 @@ android {
         }
         val supabaseUrl = localProperties.getProperty("SUPABASE_URL", "")
         val supabaseKey = localProperties.getProperty("SUPABASE_ANON_KEY", "")
+        val transcriptionApiBaseUrl = providers.gradleProperty("transcriptionApiBaseUrl")
+            .getOrElse("http://10.0.2.2:8000")
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseKey\"")
+        buildConfigField("String", "TRANSCRIPTION_API_BASE_URL", "\"$transcriptionApiBaseUrl\"")
     }
 
     buildFeatures {

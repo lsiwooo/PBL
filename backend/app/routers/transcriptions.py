@@ -31,4 +31,6 @@ async def create_transcription(file: UploadFile = File(...)) -> TranscriptionRes
         raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as error:
         raise HTTPException(status_code=502, detail="음성을 글로 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.") from error
+    if not text.strip():
+        raise HTTPException(status_code=502, detail="Gemini 응답에 전사 문장이 없습니다. 조금 더 길고 또렷하게 녹음해 주세요.")
     return TranscriptionResponse(text=text)

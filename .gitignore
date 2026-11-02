@@ -1,0 +1,17 @@
+# Local IDE and operating system files
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+**/local.properties
+**/.gradle-user-home/
+
+# Python runtime artifacts
+**/.venv/
+**/__pycache__/
+*.py[cod]

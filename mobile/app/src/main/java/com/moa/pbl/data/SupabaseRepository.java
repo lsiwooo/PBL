@@ -3,6 +3,7 @@ package com.moa.pbl.data;
 import android.content.Context;
 import android.content.SharedPreferences;
 import com.moa.pbl.BuildConfig;
+import java.time.LocalDate;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -56,20 +57,56 @@ public final class SupabaseRepository {
 
     public void insertEntry(String transcript) throws Exception {
         requireSession();
-        JSONObject item = new JSONObject().put("transcript", transcript);
+        JSONObject item = new JSONObject()
+                .put("transcript", transcript)
+                .put("occurred_on", LocalDate.now().toString());
         request("POST", "/rest/v1/voice_entries", item, accessToken(), "return=minimal");
     }
 
     public List<ScriptEntry> fetchEntries() throws Exception {
         requireSession();
-        String query = "?select=transcript,created_at&order=created_at.desc&limit=100";
-        JSONObject[] noBody = new JSONObject[0];
+        String query = "?select=transcript,created_at,occurred_on&order=occurred_on.desc,created_at.desc&limit=100";
         String response = requestRaw("GET", "/rest/v1/voice_entries" + query, null, accessToken(), null);
         JSONArray rows = new JSONArray(response);
         List<ScriptEntry> entries = new ArrayList<>();
         for (int index = 0; index < rows.length(); index++) {
             JSONObject row = rows.getJSONObject(index);
-            entries.add(new ScriptEntry(row.optString("transcript"), row.optString("created_at")));
+            entries.add(new ScriptEntry(row.optString("transcript"), row.optString("created_at"), row.optString("occurred_on")));
+        }
+        return entries;
+    }
+
+    public void insertLedgerEntries(List<ParsedTransaction> transactions) throws Exception {
+        requireSession();
+        JSONArray items = new JSONArray();
+        String occurredOn = LocalDate.now().toString();
+        for (ParsedTransaction transaction : transactions) {
+            items.put(new JSONObject()
+                    .put("item_name", transaction.itemName())
+                    .put("amount", transaction.amount())
+                    .put("transaction_type", transaction.transactionType())
+                    .put("category", transaction.category())
+                    .put("occurred_on", occurredOn));
+        }
+        if (items.length() == 0) throw new Exception("저장할 가계부 항목이 없습니다.");
+        requestRaw("POST", "/rest/v1/ledger_entries", items, accessToken(), "return=minimal");
+    }
+
+    public List<LedgerEntry> fetchLedgerEntries() throws Exception {
+        requireSession();
+        String query = "?select=item_name,amount,transaction_type,category,occurred_on&order=occurred_on.desc,created_at.desc&limit=200";
+        String response = requestRaw("GET", "/rest/v1/ledger_entries" + query, null, accessToken(), null);
+        JSONArray rows = new JSONArray(response);
+        List<LedgerEntry> entries = new ArrayList<>();
+        for (int index = 0; index < rows.length(); index++) {
+            JSONObject row = rows.getJSONObject(index);
+            entries.add(new LedgerEntry(
+                    row.optString("item_name"),
+                    row.optLong("amount"),
+                    row.optString("transaction_type"),
+                    row.optString("category", "기타"),
+                    row.optString("occurred_on")
+            ));
         }
         return entries;
     }
@@ -79,7 +116,7 @@ public final class SupabaseRepository {
         return response.isEmpty() ? new JSONObject() : new JSONObject(response);
     }
 
-    private String requestRaw(String method, String path, JSONObject body, String bearer, String preference) throws Exception {
+    private String requestRaw(String method, String path, Object body, String bearer, String preference) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(baseUrl + path).openConnection();
         try {
             connection.setRequestMethod(method);

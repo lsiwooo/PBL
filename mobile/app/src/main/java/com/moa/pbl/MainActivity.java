@@ -25,6 +25,12 @@ import com.moa.pbl.data.LedgerParserRepository;
 import com.moa.pbl.data.ParsedTransaction;
 import com.moa.pbl.data.SupabaseRepository;
 import com.moa.pbl.data.TranscriptionRepository;
+import com.moa.pbl.analysis.AnalysisViews;
+import com.moa.pbl.analysis.PeerComparison;
+import com.moa.pbl.analysis.PeerDataGenerator;
+import com.moa.pbl.analysis.PeerProfile;
+import com.moa.pbl.analysis.ProfileFormView;
+import com.moa.pbl.analysis.ProfileStore;
 import java.io.File;
 import java.text.NumberFormat;
 import java.time.LocalDate;
@@ -271,8 +277,11 @@ public final class MainActivity extends ComponentActivity {
     private void showAnalysisTab() {
         addText("AI 소비 피드백", 27, 0xff172642, false);
         addText("데이터로 나의 소비 습관을 돌아봐요", 15, 0xff7e8798, false);
-        long expenses = totalForMonth("expense", YearMonth.now());
-        Map<String, Long> categories = categoryTotals(YearMonth.now());
+        YearMonth thisMonth = YearMonth.now();
+        YearMonth lastMonth = thisMonth.minusMonths(1);
+        long expenses = totalForMonth("expense", thisMonth);
+        long income = totalForMonth("income", thisMonth);
+        Map<String, Long> categories = categoryTotals(thisMonth);
         if (expenses == 0L) {
             addCardLabel("거래를 기록하면 소비 피드백이 생겨요", "가계부에 품목과 금액을 저장하면 월간 소비 습관을 볼 수 있습니다.");
             addButton("자연어로 기록하기", v -> showTab("record"));
@@ -281,9 +290,52 @@ public final class MainActivity extends ComponentActivity {
         String topCategory = "기타"; long topAmount = 0L;
         for (Map.Entry<String, Long> entry : categories.entrySet()) if (entry.getValue() > topAmount) { topCategory = entry.getKey(); topAmount = entry.getValue(); }
         int share = Math.round(topAmount * 100f / expenses);
-        addCardLabel("이번 달 가장 큰 지출은 " + topCategory + "예요", "이번 달 지출의 " + share + "%를 차지해요. 거래 내역을 살펴보고 다음 달 예산을 정해보세요.");
+        addCardLabel("이번 달 가장 큰 지출은 " + topCategory + PeerComparison.copula(topCategory), "이번 달 지출의 " + share + "%를 차지해요. 거래 내역을 살펴보고 다음 달 예산을 정해보세요.");
         addCardLabel("이번 달 지출", formatAmount(expenses) + "원 · 등록된 " + ledgerEntries.size() + "건을 기준으로 계산했어요.");
-        addText("연령대 평균과 비교하려면 사용자 프로필과 비교 데이터 연결이 필요해요.", 13, 0xff7e8798, false);
+
+        // 전월 비교: 실제 가계부 기록으로 지난달과 비교
+        addText("지난달과 비교", 19, 0xff172642, true);
+        LinearLayout monthCard = AnalysisViews.card(this);
+        for (String line : PeerComparison.monthOverMonth(expenses, totalForMonth("expense", lastMonth), categories, categoryTotals(lastMonth)))
+            monthCard.addView(AnalysisViews.text(this, "• " + line, 14, 0xff294a37, false));
+        homeContent.addView(monthCard, AnalysisViews.cardParams(this));
+
+        // 또래 비교: 이번 달 실제 기록을 같은 성별·나이 테스트 사용자 평균과 비교
+        addText("또래와 비교", 19, 0xff172642, true);
+        PeerProfile profile = ProfileStore.load(this);
+        if (profile == null) {
+            addCardLabel("성별과 나이를 알려주세요", "같은 성별·나이 사용자와 이번 달 소비를 비교해 드려요.");
+            homeContent.addView(new ProfileFormView(this, null, saved -> { ProfileStore.save(this, saved); showTab("feedback"); }), AnalysisViews.cardParams(this));
+            return;
+        }
+        PeerComparison.Result result = PeerComparison.compare(income, expenses, categories, profile, PeerDataGenerator.getDefault());
+        LinearLayout peerCard = AnalysisViews.card(this);
+        peerCard.addView(AnalysisViews.text(this, profile.age + "세 " + profile.gender + " " + result.peerCount + "명과 비교했어요", 16, 0xff172642, true));
+        peerCard.addView(AnalysisViews.text(this, "※ 또래 데이터는 테스트용 가상 사용자 100명 기준이에요.", 12, 0xff7e8798, false));
+        long maxIncome = Math.max(result.myIncome, result.peerAvgIncome);
+        peerCard.addView(AnalysisViews.text(this, "월 수입", 14, 0xff172642, true));
+        peerCard.addView(AnalysisViews.compareRow(this, "나", result.myIncome, maxIncome, 0xff1b4fa3));
+        peerCard.addView(AnalysisViews.compareRow(this, "또래", result.peerAvgIncome, maxIncome, 0xffa7b4cc));
+        long maxExpense = Math.max(result.myExpense, result.peerAvgExpense);
+        peerCard.addView(AnalysisViews.text(this, "월 지출", 14, 0xff172642, true));
+        peerCard.addView(AnalysisViews.compareRow(this, "나", result.myExpense, maxExpense, 0xff1b4fa3));
+        peerCard.addView(AnalysisViews.compareRow(this, "또래", result.peerAvgExpense, maxExpense, 0xffa7b4cc));
+        peerCard.addView(AnalysisViews.categoryHeader(this));
+        for (String category : PeerDataGenerator.CATEGORIES)
+            peerCard.addView(AnalysisViews.categoryRow(this, category, result.myCategories.get(category), result.peerAvgCategories.get(category)));
+        homeContent.addView(peerCard, AnalysisViews.cardParams(this));
+
+        LinearLayout feedbackCard = AnalysisViews.card(this);
+        feedbackCard.addView(AnalysisViews.text(this, "또래 비교 피드백", 16, 0xff294a37, true));
+        for (String line : result.feedback) feedbackCard.addView(AnalysisViews.text(this, "• " + line, 14, 0xff294a37, false));
+        homeContent.addView(feedbackCard, AnalysisViews.cardParams(this));
+
+        TextView editProfile = AnalysisViews.text(this, "프로필 수정 ›", 14, 0xff597ab5, true);
+        editProfile.setOnClickListener(v -> {
+            editProfile.setVisibility(View.GONE);
+            homeContent.addView(new ProfileFormView(this, profile, saved -> { ProfileStore.save(this, saved); showTab("feedback"); }), AnalysisViews.cardParams(this));
+        });
+        homeContent.addView(editProfile);
     }
 
     private TextView navArrow(String label, Runnable action) {

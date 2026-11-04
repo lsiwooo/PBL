@@ -1,7 +1,6 @@
 package com.moa.pbl;
 
 import android.Manifest;
-import android.app.AlertDialog;
 import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -66,8 +65,6 @@ public final class MainActivity extends ComponentActivity {
     private String pendingTranscript = "";
     private String ledgerDraft = "";
     private boolean recordingForLedger;
-    private boolean editingProfile;
-    private boolean logoutInProgress;
     private List<LedgerEntry> ledgerEntries = new ArrayList<>();
     private String ledgerLoadError = "";
     private YearMonth selectedMonth = YearMonth.now();
@@ -89,62 +86,15 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void showLogin() {
-        showAuthScreen(false);
-    }
-
-    private void showAuthScreen(boolean signup) {
         buildRoot();
-        getWindow().setStatusBarColor(0xfffffcf7);
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-
-        LinearLayout brand = new LinearLayout(this);
-        brand.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        TextView mark = new TextView(this);
-        mark.setText("₩"); mark.setTextSize(22); mark.setTextColor(0xffffffff); mark.setGravity(android.view.Gravity.CENTER);
-        mark.setBackground(rounded(0xff1b4fa3, dp(16), 0xff1b4fa3));
-        brand.addView(mark, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView brandName = new TextView(this); brandName.setText("자연어 가계부"); brandName.setTextSize(18);
-        brandName.setTextColor(0xff172642); brandName.setTypeface(null, Typeface.BOLD);
-        LinearLayout.LayoutParams brandNameParams = new LinearLayout.LayoutParams(-2, -2); brandNameParams.setMargins(dp(12), 0, 0, 0);
-        brand.addView(brandName, brandNameParams);
-        LinearLayout.LayoutParams brandParams = new LinearLayout.LayoutParams(-1, -2); brandParams.setMargins(0, 0, 0, dp(30));
-        root.addView(brand, brandParams);
-
-        addText(signup ? "회원가입" : "다시 오셨네요", 29, 0xff172642, true);
-        addText(signup ? "간편하게 계정을 만들고 기록을 시작하세요." : "수입과 지출을 자연어로 기록해 보세요.", 15, 0xff7e8798, false);
-
-        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(20), dp(18), dp(20), dp(20));
-        form.setBackground(rounded(0xffffffff, dp(22), 0xffe7e8e8));
-        LinearLayout.LayoutParams formParams = new LinearLayout.LayoutParams(-1, -2); formParams.setMargins(0, dp(16), 0, dp(10));
-        root.addView(form, formParams);
-        emailField = addAuthField(form, "이메일", false);
-        passwordField = addAuthField(form, "비밀번호", true);
-        TextView passwordHint = new TextView(this); passwordHint.setText("비밀번호는 6자 이상 입력해 주세요.");
-        passwordHint.setTextSize(12); passwordHint.setTextColor(0xff7e8798);
-        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2); hintParams.setMargins(0, dp(4), 0, 0); form.addView(passwordHint, hintParams);
-
-        Button submit = new Button(this); submit.setText(signup ? "계정 만들기" : "로그인");
-        styleButton(submit, 0xff1b4fa3, 0xffffffff); submit.setOnClickListener(view -> authenticate(signup));
-        LinearLayout.LayoutParams submitParams = new LinearLayout.LayoutParams(-1, dp(54)); submitParams.setMargins(0, dp(10), 0, 0); form.addView(submit, submitParams);
+        addText("자연어 가계부", 32, 0xff172642, true);
+        addText("자연어로 수입과 지출을 기록하세요", 16, 0xff526052, false);
+        emailField = addInput("이메일", false);
+        passwordField = addInput("비밀번호", true);
+        addButton("로그인", view -> authenticate(false));
+        addButton("회원가입", view -> authenticate(true));
         status = addText("", 13, 0xffa23f35, false);
-
-        TextView switchMode = new TextView(this);
-        switchMode.setText(signup ? "이미 계정이 있나요?  로그인" : "처음 이용하시나요?  회원가입");
-        switchMode.setTextSize(14); switchMode.setTextColor(0xff1b4fa3); switchMode.setGravity(android.view.Gravity.CENTER);
-        switchMode.setPadding(0, dp(14), 0, dp(14)); switchMode.setOnClickListener(view -> showAuthScreen(!signup));
-        root.addView(switchMode, new LinearLayout.LayoutParams(-1, -2));
         if (!supabase.isConfigured()) status.setText("설정 필요: mobile/local.properties에 Supabase URL과 Anon Key를 입력하세요.");
-    }
-
-    private EditText addAuthField(LinearLayout parent, String label, boolean password) {
-        TextView caption = new TextView(this); caption.setText(label); caption.setTextSize(14);
-        caption.setTextColor(0xff172642); caption.setTypeface(null, Typeface.BOLD);
-        LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(-1, -2); captionParams.setMargins(0, dp(10), 0, dp(5)); parent.addView(caption, captionParams);
-        EditText input = new EditText(this); input.setSingleLine(true); input.setHint(password ? "6자 이상" : "example@email.com");
-        input.setTextSize(15); input.setPadding(dp(14), dp(10), dp(14), dp(10)); input.setBackground(rounded(0xfffffcf7, dp(14), 0xffdfe5dc));
-        input.setInputType(password ? 129 : 33); parent.addView(input, new LinearLayout.LayoutParams(-1, dp(52)));
-        return input;
     }
 
     private void authenticate(boolean signup) {
@@ -174,10 +124,10 @@ public final class MainActivity extends ComponentActivity {
         title.setText("자연어 가계부"); title.setTextSize(22); title.setTextColor(0xff1b4fa3);
         title.setTypeface(Typeface.SERIF, Typeface.BOLD);
         header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView myPage = new TextView(this);
-        myPage.setText("내 정보"); myPage.setTextSize(14); myPage.setTextColor(0xff1b4fa3);
-        myPage.setOnClickListener(v -> showTab("mypage"));
-        header.addView(myPage);
+        TextView logout = new TextView(this);
+        logout.setText("⋯"); logout.setTextSize(25); logout.setTextColor(0xff1b4fa3);
+        logout.setOnClickListener(v -> { supabase.logout(); showLogin(); });
+        header.addView(logout);
         shell.addView(header, new LinearLayout.LayoutParams(-1, dp(54)));
 
         ScrollView scroll = new ScrollView(this);
@@ -196,8 +146,7 @@ public final class MainActivity extends ComponentActivity {
         addNavigationItem(navigation, "stats", "▥", "통계");
         addNavigationItem(navigation, "record", "▤", "기록");
         addNavigationItem(navigation, "feedback", "♧", "AI 피드백");
-        addNavigationItem(navigation, "mypage", "◎", "마이페이지");
-        shell.addView(navigation, new LinearLayout.LayoutParams(-1, dp(68)));
+        shell.addView(navigation, new LinearLayout.LayoutParams(-1, dp(64)));
         setContentView(shell);
         showTab("home");
         refreshLedgerEntries();
@@ -217,7 +166,7 @@ public final class MainActivity extends ComponentActivity {
         boolean lightStatusBar = !"home".equals(tab);
         getWindow().setStatusBarColor(lightStatusBar ? 0xfffffcf7 : 0xff16468f);
         getWindow().getDecorView().setSystemUiVisibility(lightStatusBar ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR : 0);
-        String[] tabs = {"home", "stats", "record", "feedback", "mypage"};
+        String[] tabs = {"home", "stats", "record", "feedback"};
         for (int index = 0; index < tabs.length; index++) {
             navigationItems.get(index).setTextColor(tabs[index].equals(tab) ? 0xff1b4fa3 : 0xff929990);
             navigationItems.get(index).setTypeface(null, tabs[index].equals(tab) ? Typeface.BOLD : Typeface.NORMAL);
@@ -227,8 +176,7 @@ public final class MainActivity extends ComponentActivity {
         if ("home".equals(tab)) showHomeTab();
         else if ("stats".equals(tab)) showStatisticsTab();
         else if ("record".equals(tab)) showRecordTab();
-        else if ("feedback".equals(tab)) showAnalysisTab();
-        else showMyPageTab();
+        else showAnalysisTab();
     }
 
     private void showRecordTab() {
@@ -388,73 +336,6 @@ public final class MainActivity extends ComponentActivity {
             homeContent.addView(new ProfileFormView(this, profile, saved -> { ProfileStore.save(this, saved); showTab("feedback"); }), AnalysisViews.cardParams(this));
         });
         homeContent.addView(editProfile);
-    }
-
-    private void showMyPageTab() {
-        addText("마이페이지", 27, 0xff172642, true);
-        addText("계정과 소비 분석 프로필을 관리해요", 15, 0xff7e8798, false);
-
-        LinearLayout accountCard = AnalysisViews.card(this);
-        accountCard.addView(AnalysisViews.text(this, "계정", 14, 0xff597ab5, true));
-        String accountEmail = supabase.currentAccountEmail();
-        accountCard.addView(AnalysisViews.text(this, accountEmail.isEmpty() ? "로그인 상태" : accountEmail, 17, 0xff172642, true));
-        accountCard.addView(AnalysisViews.text(this, "계정 인증과 세션은 Supabase에서 관리합니다.", 13, 0xff7e8798, false));
-        homeContent.addView(accountCard, AnalysisViews.cardParams(this));
-
-        PeerProfile profile = ProfileStore.load(this);
-        LinearLayout profileCard = AnalysisViews.card(this);
-        profileCard.addView(AnalysisViews.text(this, "소비 분석 프로필", 14, 0xff597ab5, true));
-        if (profile == null) {
-            profileCard.addView(AnalysisViews.text(this, "아직 등록된 프로필이 없습니다.", 17, 0xff172642, true));
-            profileCard.addView(AnalysisViews.text(this, "프로필을 등록하면 또래 소비 비교에 사용할 수 있어요.", 13, 0xff7e8798, false));
-        } else {
-            profileCard.addView(AnalysisViews.text(this, profile.name, 20, 0xff172642, true));
-            profileCard.addView(AnalysisViews.text(this, profile.age + "세 · " + profile.gender, 14, 0xff52617a, false));
-            profileCard.addView(AnalysisViews.text(this, profile.school + " · " + profile.grade + "학년 · " + profile.region, 14, 0xff7e8798, false));
-        }
-        homeContent.addView(profileCard, AnalysisViews.cardParams(this));
-
-        Button profileButton = new Button(this);
-        profileButton.setText(editingProfile ? "프로필 수정 닫기" : (profile == null ? "프로필 등록" : "프로필 수정"));
-        styleButton(profileButton, 0xffeaf0fb, 0xff1b4fa3);
-        profileButton.setOnClickListener(v -> { editingProfile = !editingProfile; showTab("mypage"); });
-        LinearLayout.LayoutParams profileButtonParams = matchWrap(); profileButtonParams.setMargins(0, dp(4), 0, dp(8));
-        homeContent.addView(profileButton, profileButtonParams);
-        if (editingProfile) {
-            homeContent.addView(new ProfileFormView(this, profile, saved -> {
-                ProfileStore.save(this, saved);
-                editingProfile = false;
-                showTab("mypage");
-                showMessage("프로필을 저장했습니다.");
-            }), AnalysisViews.cardParams(this));
-        }
-
-        Button logoutButton = new Button(this);
-        logoutButton.setText("로그아웃"); styleButton(logoutButton, 0xffffffff, 0xffa23f35);
-        logoutButton.setBackground(rounded(0xffffffff, dp(14), 0xffe5c7c3));
-        logoutButton.setOnClickListener(v -> confirmLogout());
-        LinearLayout.LayoutParams logoutParams = matchWrap(); logoutParams.setMargins(0, dp(18), 0, dp(12));
-        homeContent.addView(logoutButton, logoutParams);
-    }
-
-    private void confirmLogout() {
-        new AlertDialog.Builder(this)
-                .setTitle("로그아웃")
-                .setMessage("계정에서 로그아웃할까요?")
-                .setNegativeButton("취소", null)
-                .setPositiveButton("로그아웃", (dialog, which) -> {
-                    if (logoutInProgress) return;
-                    logoutInProgress = true;
-                    io.execute(() -> {
-                        supabase.logout();
-                        runOnUiThread(() -> {
-                            logoutInProgress = false;
-                            editingProfile = false;
-                            showLogin();
-                        });
-                    });
-                })
-                .show();
     }
 
     private TextView navArrow(String label, Runnable action) {
@@ -666,7 +547,7 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void showParsedTransactions() {
-        if (homeContent == null || !"ledger".equals(selectedTab)) return;
+        if (homeContent == null || !"record".equals(selectedTab)) return;
         LinearLayout preview = new LinearLayout(this);
         preview.setOrientation(LinearLayout.VERTICAL);
         for (ParsedTransaction transaction : parsedTransactions) {
@@ -754,7 +635,7 @@ public final class MainActivity extends ComponentActivity {
 
     private void buildRoot() {
         homeContent = null;
-        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(22), dp(24), dp(22), dp(24)); root.setBackgroundColor(0xfffffcf7);
+        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(28, 28, 28, 28); root.setBackgroundColor(0xfff5f7f3);
         ScrollView scroll = new ScrollView(this); scroll.addView(root); setContentView(scroll);
     }
 

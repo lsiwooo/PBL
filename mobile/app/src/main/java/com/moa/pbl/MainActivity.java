@@ -31,6 +31,9 @@ import com.moa.pbl.analysis.MonthlySpendingFeedback;
 import com.moa.pbl.analysis.ConsumptionProfile;
 import com.moa.pbl.analysis.ProfileFormView;
 import com.moa.pbl.analysis.ProfileStore;
+import com.moa.pbl.analysis.PeerComparison;
+import com.moa.pbl.analysis.PeerDataGenerator;
+import com.moa.pbl.analysis.PeerViews;
 import java.io.File;
 import java.text.NumberFormat;
 import java.time.LocalDate;
@@ -334,24 +337,45 @@ public final class MainActivity extends ComponentActivity {
         YearMonth thisMonth = YearMonth.now();
         YearMonth lastMonth = thisMonth.minusMonths(1);
         long expenses = totalForMonth("expense", thisMonth);
+        long income = totalForMonth("income", thisMonth);
         Map<String, Long> categories = categoryTotals(thisMonth);
-        if (expenses == 0L) {
+        boolean hasRecords = expenses > 0L;
+
+        if (!hasRecords) {
             addCardLabel("거래를 기록하면 소비 피드백이 생겨요", "가계부에 품목과 금액을 저장하면 월간 소비 습관을 볼 수 있습니다.");
             addButton("자연어로 기록하기", v -> showTab("record"));
+        } else {
+            String topCategory = "기타"; long topAmount = 0L;
+            for (Map.Entry<String, Long> entry : categories.entrySet()) if (entry.getValue() > topAmount) { topCategory = entry.getKey(); topAmount = entry.getValue(); }
+            int share = Math.round(topAmount * 100f / expenses);
+            addCardLabel("이번 달 가장 큰 지출은 " + topCategory + MonthlySpendingFeedback.categoryCopula(topCategory), "이번 달 지출의 " + share + "%를 차지해요. 거래 내역을 살펴보고 다음 달 예산을 정해보세요.");
+            addCardLabel("이번 달 지출", formatAmount(expenses) + "원 · 등록된 " + ledgerEntries.size() + "건을 기준으로 계산했어요.");
+
+            addText("지난달과 비교", 19, 0xff172642, true);
+            LinearLayout monthCard = AnalysisViews.card(this);
+            for (String line : MonthlySpendingFeedback.compareMonths(expenses, totalForMonth("expense", lastMonth), categories, categoryTotals(lastMonth)))
+                monthCard.addView(AnalysisViews.text(this, "• " + line, 14, 0xff294a37, false));
+            homeContent.addView(monthCard, AnalysisViews.cardParams(this));
+        }
+
+        // 또래 비교: 마이페이지 프로필(나이·직업)로 비슷한 테스트 사용자 평균과 비교
+        addText("또래와 비교", 19, 0xff172642, true);
+        ConsumptionProfile profile = consumptionProfile;
+        if (profile == null) {
+            addCardLabel("마이페이지에서 프로필을 등록해 주세요", "생년월일과 직업을 등록하면 비슷한 사용자와 이번 달 소비를 비교해 드려요.");
+            addButton("프로필 등록하러 가기", v -> showTab("mypage"));
             return;
         }
-        String topCategory = "기타"; long topAmount = 0L;
-        for (Map.Entry<String, Long> entry : categories.entrySet()) if (entry.getValue() > topAmount) { topCategory = entry.getKey(); topAmount = entry.getValue(); }
-        int share = Math.round(topAmount * 100f / expenses);
-        addCardLabel("이번 달 가장 큰 지출은 " + topCategory + MonthlySpendingFeedback.categoryCopula(topCategory), "이번 달 지출의 " + share + "%를 차지해요. 거래 내역을 살펴보고 다음 달 예산을 정해보세요.");
-        addCardLabel("이번 달 지출", formatAmount(expenses) + "원 · 등록된 " + ledgerEntries.size() + "건을 기준으로 계산했어요.");
-
-        addText("지난달과 비교", 19, 0xff172642, true);
-        LinearLayout monthCard = AnalysisViews.card(this);
-        for (String line : MonthlySpendingFeedback.compareMonths(expenses, totalForMonth("expense", lastMonth), categories, categoryTotals(lastMonth)))
-            monthCard.addView(AnalysisViews.text(this, "• " + line, 14, 0xff294a37, false));
-        homeContent.addView(monthCard, AnalysisViews.cardParams(this));
+        if (!hasRecords) {
+            addCardLabel("이번 달 거래를 기록하면 또래와 비교해 드려요", "등록한 프로필의 나이와 직업을 기준으로 비교해요.");
+            return;
+        }
+        PeerComparison.Result result = PeerComparison.compare(income, expenses, categories,
+                profile.ageOn(LocalDate.now()), profile.occupation, PeerDataGenerator.getDefault());
+        homeContent.addView(PeerViews.comparisonCard(this, result), AnalysisViews.cardParams(this));
+        homeContent.addView(PeerViews.feedbackCard(this, result), AnalysisViews.cardParams(this));
     }
+
 
     private void showMyPageTab() {
         addText("마이페이지", 27, 0xff172642, true);

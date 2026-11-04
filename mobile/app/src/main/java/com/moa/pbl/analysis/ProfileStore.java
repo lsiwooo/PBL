@@ -5,10 +5,9 @@ import android.content.SharedPreferences;
 
 import androidx.annotation.Nullable;
 
-/**
- * 프로필을 기기 안에만 저장한다 (Supabase 스키마는 건드리지 않음).
- * 추후 Supabase에 저장하기로 팀이 합의하면 이 클래스만 바꾸면 된다.
- */
+import java.time.LocalDate;
+
+/** Reads the prior device-only profile once so it can be moved to the signed-in account. */
 public final class ProfileStore {
 
     private static final String PREFS = "peer_profile";
@@ -17,30 +16,40 @@ public final class ProfileStore {
     }
 
     @Nullable
-    public static PeerProfile load(Context context) {
+    public static ConsumptionProfile loadForAccount(Context context, String accountEmail) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        String name = prefs.getString("name", null);
-        if (name == null) {
+        String owner = prefs.getString("account_email", "");
+        if (!owner.isEmpty() && !owner.equalsIgnoreCase(accountEmail)) return null;
+        String birthDate = prefs.getString("birth_date", null);
+        if (birthDate == null) {
+            if (!prefs.getAll().isEmpty()) clear(context);
             return null;
         }
-        return new PeerProfile(
-                name,
-                prefs.getString("gender", PeerProfile.MALE),
-                prefs.getInt("age", PeerProfile.MIN_AGE),
-                prefs.getString("school", ""),
-                prefs.getInt("grade", 1),
-                prefs.getString("region", PeerProfile.REGIONS[0])
-        );
+        try {
+            if (owner.isEmpty()) prefs.edit().putString("account_email", accountEmail).apply();
+            return new ConsumptionProfile(
+                    LocalDate.parse(birthDate),
+                    prefs.getString("occupation", ""),
+                    prefs.getString("school_type", prefs.getString("school_level", "")),
+                    prefs.getString("school_name", ""),
+                    prefs.getInt("grade", 0),
+                    prefs.getString("region", "")
+            );
+        } catch (RuntimeException invalidProfile) {
+            clear(context);
+            return null;
+        }
     }
 
-    public static void save(Context context, PeerProfile profile) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString("name", profile.name)
-                .putString("gender", profile.gender)
-                .putInt("age", profile.age)
-                .putString("school", profile.school)
-                .putInt("grade", profile.grade)
-                .putString("region", profile.region)
-                .apply();
+    public static void clearForAccount(Context context, String accountEmail) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String owner = prefs.getString("account_email", "");
+        if (owner.isEmpty() || owner.equalsIgnoreCase(accountEmail)) {
+            prefs.edit().clear().apply();
+        }
+    }
+
+    private static void clear(Context context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply();
     }
 }

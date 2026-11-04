@@ -1,6 +1,7 @@
 package com.moa.pbl;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -12,6 +13,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ImageView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -19,16 +21,14 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.activity.ComponentActivity;
 import androidx.core.content.ContextCompat;
-import com.moa.pbl.data.ScriptEntry;
 import com.moa.pbl.data.LedgerEntry;
 import com.moa.pbl.data.LedgerParserRepository;
 import com.moa.pbl.data.ParsedTransaction;
 import com.moa.pbl.data.SupabaseRepository;
 import com.moa.pbl.data.TranscriptionRepository;
 import com.moa.pbl.analysis.AnalysisViews;
-import com.moa.pbl.analysis.PeerComparison;
-import com.moa.pbl.analysis.PeerDataGenerator;
-import com.moa.pbl.analysis.PeerProfile;
+import com.moa.pbl.analysis.MonthlySpendingFeedback;
+import com.moa.pbl.analysis.ConsumptionProfile;
 import com.moa.pbl.analysis.ProfileFormView;
 import com.moa.pbl.analysis.ProfileStore;
 import java.io.File;
@@ -52,19 +52,20 @@ public final class MainActivity extends ComponentActivity {
     private LinearLayout root;
     private EditText emailField;
     private EditText passwordField;
-    private EditText scriptField;
     private EditText ledgerTextField;
     private TextView status;
-    private TextView records;
-    private TextView ledgerRecords;
     private Button recordButton;
     private LinearLayout homeContent;
     private final List<TextView> navigationItems = new ArrayList<>();
-    private List<ParsedTransaction> parsedTransactions = new ArrayList<>();
+    private Button addLedgerButton;
     private String selectedTab = "home";
-    private String pendingTranscript = "";
     private String ledgerDraft = "";
-    private boolean recordingForLedger;
+    private boolean editingProfile;
+    private boolean logoutInProgress;
+    private boolean profileLoading;
+    private boolean profileLoadFailed;
+    private ConsumptionProfile consumptionProfile;
+    private int profileRequestId;
     private List<LedgerEntry> ledgerEntries = new ArrayList<>();
     private String ledgerLoadError = "";
     private YearMonth selectedMonth = YearMonth.now();
@@ -86,15 +87,63 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void showLogin() {
+        showAuthScreen(false);
+    }
+
+    private void showAuthScreen(boolean signup) {
         buildRoot();
-        addText("자연어 가계부", 32, 0xff172642, true);
-        addText("자연어로 수입과 지출을 기록하세요", 16, 0xff526052, false);
-        emailField = addInput("이메일", false);
-        passwordField = addInput("비밀번호", true);
-        addButton("로그인", view -> authenticate(false));
-        addButton("회원가입", view -> authenticate(true));
+        getWindow().setStatusBarColor(0xfffffcf7);
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+
+        LinearLayout brand = new LinearLayout(this);
+        brand.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        ImageView mark = new ImageView(this);
+        mark.setImageResource(com.moa.pbl.R.drawable.app_brand);
+        mark.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        brand.addView(mark, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView brandName = new TextView(this); brandName.setText("자연어 가계부"); brandName.setTextSize(18);
+        brandName.setTextColor(0xff172642); brandName.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        brandName.setLetterSpacing(-0.015f);
+        LinearLayout.LayoutParams brandNameParams = new LinearLayout.LayoutParams(-2, -2); brandNameParams.setMargins(dp(12), 0, 0, 0);
+        brand.addView(brandName, brandNameParams);
+        LinearLayout.LayoutParams brandParams = new LinearLayout.LayoutParams(-1, -2); brandParams.setMargins(0, 0, 0, dp(30));
+        root.addView(brand, brandParams);
+
+        addText(signup ? "회원가입" : "다시 오셨네요", 29, 0xff172642, true);
+        addText(signup ? "간편하게 계정을 만들고 기록을 시작하세요." : "수입과 지출을 자연어로 기록해 보세요.", 15, 0xff7e8798, false);
+
+        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(20), dp(18), dp(20), dp(20));
+        form.setBackground(rounded(0xffffffff, dp(22), 0xffe7e8e8));
+        LinearLayout.LayoutParams formParams = new LinearLayout.LayoutParams(-1, -2); formParams.setMargins(0, dp(16), 0, dp(10));
+        root.addView(form, formParams);
+        emailField = addAuthField(form, "이메일", false);
+        passwordField = addAuthField(form, "비밀번호", true);
+        TextView passwordHint = new TextView(this); passwordHint.setText("비밀번호는 6자 이상 입력해 주세요.");
+        passwordHint.setTextSize(12); passwordHint.setTextColor(0xff7e8798);
+        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2); hintParams.setMargins(0, dp(4), 0, 0); form.addView(passwordHint, hintParams);
+
+        Button submit = new Button(this); submit.setText(signup ? "계정 만들기" : "로그인");
+        styleButton(submit, 0xff1b4fa3, 0xffffffff); submit.setOnClickListener(view -> authenticate(signup));
+        LinearLayout.LayoutParams submitParams = new LinearLayout.LayoutParams(-1, dp(54)); submitParams.setMargins(0, dp(10), 0, 0); form.addView(submit, submitParams);
         status = addText("", 13, 0xffa23f35, false);
-        if (!supabase.isConfigured()) status.setText("설정 필요: mobile/local.properties에 Supabase URL과 Anon Key를 입력하세요.");
+
+        TextView switchMode = new TextView(this);
+        switchMode.setText(signup ? "이미 계정이 있나요?  로그인" : "처음 이용하시나요?  회원가입");
+        switchMode.setTextSize(14); switchMode.setTextColor(0xff1b4fa3); switchMode.setGravity(android.view.Gravity.CENTER);
+        switchMode.setPadding(0, dp(14), 0, dp(14)); switchMode.setOnClickListener(view -> showAuthScreen(!signup));
+        root.addView(switchMode, new LinearLayout.LayoutParams(-1, -2));
+        if (!supabase.isConfigured()) status.setText("지금은 로그인할 수 없어요. 잠시 후 다시 시도해 주세요.");
+    }
+
+    private EditText addAuthField(LinearLayout parent, String label, boolean password) {
+        TextView caption = new TextView(this); caption.setText(label); caption.setTextSize(14);
+        caption.setTextColor(0xff172642); caption.setTypeface(null, Typeface.BOLD);
+        LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(-1, -2); captionParams.setMargins(0, dp(10), 0, dp(5)); parent.addView(caption, captionParams);
+        EditText input = new EditText(this); input.setSingleLine(true); input.setHint(password ? "6자 이상" : "example@email.com");
+        input.setTextSize(15); input.setPadding(dp(14), dp(10), dp(14), dp(10)); input.setBackground(rounded(0xfffffcf7, dp(14), 0xffdfe5dc));
+        input.setInputType(password ? 129 : 33); parent.addView(input, new LinearLayout.LayoutParams(-1, dp(52)));
+        return input;
     }
 
     private void authenticate(boolean signup) {
@@ -115,25 +164,13 @@ public final class MainActivity extends ComponentActivity {
     private void showJournal() {
         LinearLayout shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.VERTICAL);
-        shell.setPadding(dp(20), dp(10), dp(20), 0);
+        shell.setPadding(dp(20), 0, dp(20), 0);
         shell.setBackgroundColor(0xfffffcf7);
-
-        LinearLayout header = new LinearLayout(this);
-        header.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        TextView title = new TextView(this);
-        title.setText("자연어 가계부"); title.setTextSize(22); title.setTextColor(0xff1b4fa3);
-        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
-        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView logout = new TextView(this);
-        logout.setText("⋯"); logout.setTextSize(25); logout.setTextColor(0xff1b4fa3);
-        logout.setOnClickListener(v -> { supabase.logout(); showLogin(); });
-        header.addView(logout);
-        shell.addView(header, new LinearLayout.LayoutParams(-1, dp(54)));
 
         ScrollView scroll = new ScrollView(this);
         homeContent = new LinearLayout(this);
         homeContent.setOrientation(LinearLayout.VERTICAL);
-        homeContent.setPadding(0, dp(8), 0, dp(18));
+        homeContent.setPadding(0, dp(18), 0, dp(18));
         scroll.addView(homeContent);
         shell.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
@@ -145,10 +182,12 @@ public final class MainActivity extends ComponentActivity {
         addNavigationItem(navigation, "home", "⌂", "홈");
         addNavigationItem(navigation, "stats", "▥", "통계");
         addNavigationItem(navigation, "record", "▤", "기록");
-        addNavigationItem(navigation, "feedback", "♧", "AI 피드백");
-        shell.addView(navigation, new LinearLayout.LayoutParams(-1, dp(64)));
+        addNavigationItem(navigation, "feedback", "♧", "소비 피드백");
+        addNavigationItem(navigation, "mypage", "◎", "마이페이지");
+        shell.addView(navigation, new LinearLayout.LayoutParams(-1, dp(68)));
         setContentView(shell);
         showTab("home");
+        loadConsumptionProfile();
         refreshLedgerEntries();
     }
 
@@ -166,7 +205,7 @@ public final class MainActivity extends ComponentActivity {
         boolean lightStatusBar = !"home".equals(tab);
         getWindow().setStatusBarColor(lightStatusBar ? 0xfffffcf7 : 0xff16468f);
         getWindow().getDecorView().setSystemUiVisibility(lightStatusBar ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR : 0);
-        String[] tabs = {"home", "stats", "record", "feedback"};
+        String[] tabs = {"home", "stats", "record", "feedback", "mypage"};
         for (int index = 0; index < tabs.length; index++) {
             navigationItems.get(index).setTextColor(tabs[index].equals(tab) ? 0xff1b4fa3 : 0xff929990);
             navigationItems.get(index).setTypeface(null, tabs[index].equals(tab) ? Typeface.BOLD : Typeface.NORMAL);
@@ -176,35 +215,33 @@ public final class MainActivity extends ComponentActivity {
         if ("home".equals(tab)) showHomeTab();
         else if ("stats".equals(tab)) showStatisticsTab();
         else if ("record".equals(tab)) showRecordTab();
-        else showAnalysisTab();
+        else if ("feedback".equals(tab)) showAnalysisTab();
+        else showMyPageTab();
     }
 
     private void showRecordTab() {
         addText("자연어로 기록하기", 27, 0xff172642, false);
-        addText("평소 말투 그대로 입력해 보세요", 15, 0xff7e8798, false);
-        addCardLabel("무엇을 사고, 얼마를 썼는지 알려주세요.", "수입도 같은 방식으로 기록할 수 있어요.");
+        addText("말한 내용을 확인하고 가계부에 추가해요", 15, 0xff7e8798, false);
+        addCardLabel("무엇을 사고 얼마를 썼는지 말해 주세요.", "인식된 문장을 확인하고 가계부에 추가할 수 있어요.");
         recordButton = new Button(this);
-        recordButton.setText("●  음성으로 입력"); styleButton(recordButton, 0xff1b4fa3, 0xffffffff);
-        recordButton.setOnClickListener(v -> { recordingForLedger = true; toggleRecording(); });
+        recordButton.setText("●  음성으로 입력");
+        styleButton(recordButton, 0xff1b4fa3, 0xffffffff);
+        recordButton.setOnClickListener(v -> toggleRecording());
         homeContent.addView(recordButton, matchWrap());
-        ledgerTextField = addInput("예: 오늘 점심 김치찌개 9,000원 먹었어", false);
-        ledgerTextField.setSingleLine(false);
-        ledgerTextField.setMinLines(5);
-        ledgerTextField.setText(ledgerDraft);
-        addButton("✧  AI로 분석하기", v -> analyzeLedger());
         status = addText("", 13, 0xff42644b, false);
+        ledgerTextField = addInput("예: 오늘 텀블러 32,000원, 빗 15,000원에 샀어", false);
+        ledgerTextField.setSingleLine(false);
+        ledgerTextField.setMinLines(3);
+        ledgerTextField.setText(ledgerDraft);
+        addLedgerButton = new Button(this);
+        addLedgerButton.setText("가계부에 추가하기");
+        styleButton(addLedgerButton, 0xff1b4fa3, 0xffffffff);
+        addLedgerButton.setOnClickListener(v -> addLedgerFromText());
+        homeContent.addView(addLedgerButton, matchWrap());
         addText("이렇게 말해 보세요", 18, 0xff172642, false);
         addExample("어제 카페에서 4,500원 썼어");
         addExample("이번 달 알바비 65만원 들어왔어");
         addExample("친구 생일 선물로 3만원 결제했어");
-        addCardLabel("AI가 문장에서 금액·날짜·카테고리를 찾아드려요.", "분석 후 결과를 확인하고 직접 수정할 수 있어요.");
-        if (!parsedTransactions.isEmpty()) showParsedTransactions();
-        addButton("원문 스크립트도 날짜별로 저장", v -> saveScript());
-        scriptField = addInput("저장할 전체 스크립트 (선택)", false);
-        scriptField.setSingleLine(false); scriptField.setMinLines(2); scriptField.setText(pendingTranscript);
-        addText("저장한 음성 스크립트", 18, 0xff172642, true);
-        records = addText("불러오는 중…", 14, 0xff454d45, false);
-        refreshEntries();
     }
 
     private void addExample(String example) {
@@ -218,21 +255,38 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void showHomeTab() {
-        String month = LocalDate.now().getYear() + "년 " + LocalDate.now().getMonthValue() + "월";
-        long income = totalForMonth("income", YearMonth.now());
-        long expenses = totalForMonth("expense", YearMonth.now());
+        YearMonth month = selectedMonth;
+        long income = totalForMonth("income", month);
+        long expenses = totalForMonth("expense", month);
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL); hero.setPadding(dp(22), dp(22), dp(22), dp(20));
         hero.setBackground(rounded(0xff16468f, dp(28), 0xff16468f));
-        addTo(hero, "자연어 가계부", 18, 0xffffffff, true);
-        addTo(hero, month + "  ⌄", 20, 0xffffffff, true);
-        addTo(hero, "이번 달 남은 금액", 15, 0xffb6c9e7, false);
+        LinearLayout monthRow = new LinearLayout(this);
+        monthRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView previous = navArrow("‹", () -> { selectedMonth = selectedMonth.minusMonths(1); showTab("home"); });
+        previous.setTextColor(0xffffffff);
+        TextView monthLabel = new TextView(this);
+        monthLabel.setText(month.getYear() + "년 " + month.getMonthValue() + "월");
+        monthLabel.setTextSize(20); monthLabel.setTextColor(0xffffffff);
+        monthLabel.setTypeface(null, Typeface.BOLD); monthLabel.setGravity(android.view.Gravity.CENTER);
+        monthRow.addView(previous, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        monthRow.addView(monthLabel, new LinearLayout.LayoutParams(0, dp(44), 1));
+        if (month.isBefore(YearMonth.now())) {
+            TextView next = navArrow("›", () -> { selectedMonth = selectedMonth.plusMonths(1); showTab("home"); });
+            next.setTextColor(0xffffffff);
+            monthRow.addView(next, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        } else {
+            TextView spacer = new TextView(this);
+            monthRow.addView(spacer, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        }
+        hero.addView(monthRow);
+        addTo(hero, "남은 금액", 15, 0xffb6c9e7, false);
         addTo(hero, formatAmount(income - expenses) + "원", 39, 0xffffffff, true);
         LinearLayout totals = new LinearLayout(this);
         addTo(totals, "총수입\n" + formatAmount(income) + "원", 14, 0xffffffff, true, 1);
         addTo(totals, "총지출\n" + formatAmount(expenses) + "원", 14, 0xffffffff, true, 1);
         hero.addView(totals);
-        LinearLayout.LayoutParams heroParams = matchWrap(); heroParams.setMargins(0, dp(8), 0, dp(18));
+        LinearLayout.LayoutParams heroParams = matchWrap(); heroParams.setMargins(0, 0, 0, dp(18));
         homeContent.addView(hero, heroParams);
 
         LinearLayout prompt = clickableCard("✧", "챗봇 비서에게 말해 볼까요?", "오늘 쓴 돈 기록하기", 0xfffff5df, () -> showTab("record"));
@@ -242,7 +296,7 @@ public final class MainActivity extends ComponentActivity {
         LinearLayout.LayoutParams quickParams = new LinearLayout.LayoutParams(0, dp(108), 1); quickParams.setMargins(0, 0, dp(6), 0);
         quickRow.addView(quickCard("월간 통계", "어디에 많이 썼을까요?", 0xffe8f0ed, "stats"), quickParams);
         LinearLayout.LayoutParams feedbackParams = new LinearLayout.LayoutParams(0, dp(108), 1); feedbackParams.setMargins(dp(6), 0, 0, 0);
-        quickRow.addView(quickCard("AI 소비 피드백", "이번 달 습관을 확인해요", 0xffedf1fa, "feedback"), feedbackParams);
+        quickRow.addView(quickCard("소비 피드백", "이번 달 습관을 확인해요", 0xffedf1fa, "feedback"), feedbackParams);
         homeContent.addView(quickRow);
         LinearLayout recentHeader = new LinearLayout(this); recentHeader.setGravity(android.view.Gravity.CENTER_VERTICAL);
         TextView recent = new TextView(this); recent.setText("최근 소비"); recent.setTextSize(20); recent.setTextColor(0xff172642);
@@ -250,7 +304,7 @@ public final class MainActivity extends ComponentActivity {
         TextView all = new TextView(this); all.setText("전체보기"); all.setTextColor(0xff597ab5); all.setOnClickListener(v -> showTab("stats")); recentHeader.addView(all);
         homeContent.addView(recentHeader);
         addRecentTransactions(5);
-        if (!ledgerLoadError.isEmpty()) addText("Supabase 테이블 설정을 확인해 주세요: " + ledgerLoadError, 12, 0xffa23f35, false);
+        if (!ledgerLoadError.isEmpty()) addText(ledgerLoadError, 12, 0xffa23f35, false);
     }
 
     private void showStatisticsTab() {
@@ -275,78 +329,149 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void showAnalysisTab() {
-        addText("AI 소비 피드백", 27, 0xff172642, false);
+        addText("소비 피드백", 27, 0xff172642, false);
         addText("데이터로 나의 소비 습관을 돌아봐요", 15, 0xff7e8798, false);
         YearMonth thisMonth = YearMonth.now();
         YearMonth lastMonth = thisMonth.minusMonths(1);
         long expenses = totalForMonth("expense", thisMonth);
-        long income = totalForMonth("income", thisMonth);
         Map<String, Long> categories = categoryTotals(thisMonth);
-        boolean hasRecords = expenses > 0L;
-
-        if (!hasRecords) {
+        if (expenses == 0L) {
             addCardLabel("거래를 기록하면 소비 피드백이 생겨요", "가계부에 품목과 금액을 저장하면 월간 소비 습관을 볼 수 있습니다.");
             addButton("자연어로 기록하기", v -> showTab("record"));
-        } else {
-            String topCategory = "기타"; long topAmount = 0L;
-            for (Map.Entry<String, Long> entry : categories.entrySet()) if (entry.getValue() > topAmount) { topCategory = entry.getKey(); topAmount = entry.getValue(); }
-            int share = Math.round(topAmount * 100f / expenses);
-            addCardLabel("이번 달 가장 큰 지출은 " + topCategory + PeerComparison.copula(topCategory), "이번 달 지출의 " + share + "%를 차지해요. 거래 내역을 살펴보고 다음 달 예산을 정해보세요.");
-            addCardLabel("이번 달 지출", formatAmount(expenses) + "원 · 등록된 " + ledgerEntries.size() + "건을 기준으로 계산했어요.");
-
-            // 전월 비교: 실제 가계부 기록으로 지난달과 비교
-            addText("지난달과 비교", 19, 0xff172642, true);
-            LinearLayout monthCard = AnalysisViews.card(this);
-            for (String line : PeerComparison.monthOverMonth(expenses, totalForMonth("expense", lastMonth), categories, categoryTotals(lastMonth)))
-                monthCard.addView(AnalysisViews.text(this, "• " + line, 14, 0xff294a37, false));
-            homeContent.addView(monthCard, AnalysisViews.cardParams(this));
-        }
-
-        // 또래 비교: 기록이 없어도 프로필은 먼저 입력할 수 있다
-        addText("또래와 비교", 19, 0xff172642, true);
-        PeerProfile profile = ProfileStore.load(this);
-        if (profile == null) {
-            addCardLabel("성별과 나이를 알려주세요", hasRecords
-                    ? "같은 성별·나이 사용자와 이번 달 소비를 비교해 드려요."
-                    : "미리 입력해 두면 거래를 기록하는 대로 또래와 비교해 드려요.");
-            homeContent.addView(new ProfileFormView(this, null, saved -> { ProfileStore.save(this, saved); showTab("feedback"); }), AnalysisViews.cardParams(this));
             return;
         }
+        String topCategory = "기타"; long topAmount = 0L;
+        for (Map.Entry<String, Long> entry : categories.entrySet()) if (entry.getValue() > topAmount) { topCategory = entry.getKey(); topAmount = entry.getValue(); }
+        int share = Math.round(topAmount * 100f / expenses);
+        addCardLabel("이번 달 가장 큰 지출은 " + topCategory + MonthlySpendingFeedback.categoryCopula(topCategory), "이번 달 지출의 " + share + "%를 차지해요. 거래 내역을 살펴보고 다음 달 예산을 정해보세요.");
+        addCardLabel("이번 달 지출", formatAmount(expenses) + "원 · 등록된 " + ledgerEntries.size() + "건을 기준으로 계산했어요.");
 
-        if (!hasRecords) {
-            addCardLabel(profile.age + "세 " + profile.gender + " 프로필이 저장되어 있어요", "이번 달 거래를 기록하면 같은 성별·나이 사용자와 소비를 비교해 드려요.");
-        } else {
-            PeerComparison.Result result = PeerComparison.compare(income, expenses, categories, profile, PeerDataGenerator.getDefault());
-            LinearLayout peerCard = AnalysisViews.card(this);
-            peerCard.addView(AnalysisViews.text(this, profile.age + "세 " + profile.gender + " " + result.peerCount + "명과 비교했어요", 16, 0xff172642, true));
-            peerCard.addView(AnalysisViews.text(this, "※ 또래 데이터는 테스트용 가상 사용자 100명 기준이에요.", 12, 0xff7e8798, false));
-            long maxIncome = Math.max(result.myIncome, result.peerAvgIncome);
-            peerCard.addView(AnalysisViews.text(this, "월 수입", 14, 0xff172642, true));
-            peerCard.addView(AnalysisViews.compareRow(this, "나", result.myIncome, maxIncome, 0xff1b4fa3));
-            peerCard.addView(AnalysisViews.compareRow(this, "또래", result.peerAvgIncome, maxIncome, 0xffa7b4cc));
-            long maxExpense = Math.max(result.myExpense, result.peerAvgExpense);
-            peerCard.addView(AnalysisViews.text(this, "월 지출", 14, 0xff172642, true));
-            peerCard.addView(AnalysisViews.compareRow(this, "나", result.myExpense, maxExpense, 0xff1b4fa3));
-            peerCard.addView(AnalysisViews.compareRow(this, "또래", result.peerAvgExpense, maxExpense, 0xffa7b4cc));
-            peerCard.addView(AnalysisViews.categoryHeader(this));
-            for (String category : PeerDataGenerator.CATEGORIES)
-                peerCard.addView(AnalysisViews.categoryRow(this, category, result.myCategories.get(category), result.peerAvgCategories.get(category)));
-            homeContent.addView(peerCard, AnalysisViews.cardParams(this));
-
-            LinearLayout feedbackCard = AnalysisViews.card(this);
-            feedbackCard.addView(AnalysisViews.text(this, "또래 비교 피드백", 16, 0xff294a37, true));
-            for (String line : result.feedback) feedbackCard.addView(AnalysisViews.text(this, "• " + line, 14, 0xff294a37, false));
-            homeContent.addView(feedbackCard, AnalysisViews.cardParams(this));
-        }
-
-        TextView editProfile = AnalysisViews.text(this, "프로필 수정 ›", 14, 0xff597ab5, true);
-        editProfile.setOnClickListener(v -> {
-            editProfile.setVisibility(View.GONE);
-            homeContent.addView(new ProfileFormView(this, profile, saved -> { ProfileStore.save(this, saved); showTab("feedback"); }), AnalysisViews.cardParams(this));
-        });
-        homeContent.addView(editProfile);
+        addText("지난달과 비교", 19, 0xff172642, true);
+        LinearLayout monthCard = AnalysisViews.card(this);
+        for (String line : MonthlySpendingFeedback.compareMonths(expenses, totalForMonth("expense", lastMonth), categories, categoryTotals(lastMonth)))
+            monthCard.addView(AnalysisViews.text(this, "• " + line, 14, 0xff294a37, false));
+        homeContent.addView(monthCard, AnalysisViews.cardParams(this));
     }
 
+    private void showMyPageTab() {
+        addText("마이페이지", 27, 0xff172642, true);
+        addText("계정과 소비 분석 프로필을 관리해요", 15, 0xff7e8798, false);
+
+        LinearLayout accountCard = AnalysisViews.card(this);
+        accountCard.addView(AnalysisViews.text(this, "계정", 14, 0xff597ab5, true));
+        String accountEmail = supabase.currentAccountEmail();
+        accountCard.addView(AnalysisViews.text(this, accountEmail.isEmpty() ? "로그인 상태" : accountEmail, 17, 0xff172642, true));
+        homeContent.addView(accountCard, AnalysisViews.cardParams(this));
+
+        ConsumptionProfile profile = consumptionProfile;
+        LinearLayout profileCard = AnalysisViews.card(this);
+        profileCard.addView(AnalysisViews.text(this, "소비 분석 프로필", 14, 0xff597ab5, true));
+        if (profileLoading) {
+            profileCard.addView(AnalysisViews.text(this, "프로필을 불러오고 있어요.", 15, 0xff7e8798, false));
+        } else if (profile == null) {
+            profileCard.addView(AnalysisViews.text(this, "아직 등록된 프로필이 없습니다.", 17, 0xff172642, true));
+            profileCard.addView(AnalysisViews.text(this, profileLoadFailed ? "프로필을 불러오지 못했어요. 다시 시도해 주세요." : "등록하지 않아도 가계부를 이용할 수 있어요.", 13, 0xff7e8798, false));
+        } else {
+            profileCard.addView(AnalysisViews.text(this, profile.birthDate + " · " + profile.ageOn(LocalDate.now()) + "세", 16, 0xff172642, true));
+            profileCard.addView(AnalysisViews.text(this, profile.occupation, 14, 0xff52617a, false));
+            if (ConsumptionProfile.STUDENT.equals(profile.occupation))
+                profileCard.addView(AnalysisViews.text(this, profile.schoolType + " · " + profile.schoolName + " · " + profile.grade + "학년", 14, 0xff7e8798, false));
+            profileCard.addView(AnalysisViews.text(this, profile.region, 14, 0xff7e8798, false));
+        }
+        profileCard.addView(AnalysisViews.text(this, "프로필은 소비 분석에 활용돼요.", 12, 0xff7e8798, false));
+        homeContent.addView(profileCard, AnalysisViews.cardParams(this));
+
+        Button profileButton = new Button(this);
+        profileButton.setText(editingProfile ? "프로필 수정 닫기" : (profile == null ? "프로필 등록" : "프로필 수정"));
+        styleButton(profileButton, 0xffeaf0fb, 0xff1b4fa3);
+        profileButton.setOnClickListener(v -> { editingProfile = !editingProfile; showTab("mypage"); });
+        LinearLayout.LayoutParams profileButtonParams = matchWrap(); profileButtonParams.setMargins(0, dp(4), 0, dp(8));
+        homeContent.addView(profileButton, profileButtonParams);
+        if (editingProfile) {
+            homeContent.addView(new ProfileFormView(this, profile, saved -> {
+                showMessage("프로필을 저장하고 있어요.");
+        io.execute(() -> {
+                    try {
+                        supabase.upsertConsumptionProfile(saved);
+                        ProfileStore.clearForAccount(MainActivity.this, supabase.currentAccountEmail());
+                        runOnUiThread(() -> {
+                            consumptionProfile = saved;
+                            profileLoadFailed = false;
+                            editingProfile = false;
+                            showTab("mypage");
+                            showMessage("프로필을 저장했습니다.");
+                        });
+                    } catch (Exception error) {
+                        runOnUiThread(() -> showMessage("프로필을 저장하지 못했어요. 다시 시도해 주세요."));
+                    }
+                });
+            }), AnalysisViews.cardParams(this));
+        }
+
+        Button logoutButton = new Button(this);
+        logoutButton.setText("로그아웃"); styleButton(logoutButton, 0xffffffff, 0xffa23f35);
+        logoutButton.setBackground(rounded(0xffffffff, dp(14), 0xffe5c7c3));
+        logoutButton.setOnClickListener(v -> confirmLogout());
+        LinearLayout.LayoutParams logoutParams = matchWrap(); logoutParams.setMargins(0, dp(18), 0, dp(12));
+        homeContent.addView(logoutButton, logoutParams);
+    }
+
+    private void loadConsumptionProfile() {
+        if (profileLoading) return;
+        profileLoading = true;
+        String accountEmail = supabase.currentAccountEmail();
+        int requestId = ++profileRequestId;
+        io.execute(() -> {
+            ConsumptionProfile legacyProfile = ProfileStore.loadForAccount(MainActivity.this, accountEmail);
+            try {
+                ConsumptionProfile savedProfile = supabase.fetchConsumptionProfile();
+                if (savedProfile == null && legacyProfile != null) {
+                    supabase.upsertConsumptionProfile(legacyProfile);
+                    savedProfile = legacyProfile;
+                }
+                ProfileStore.clearForAccount(MainActivity.this, accountEmail);
+                ConsumptionProfile result = savedProfile;
+                runOnUiThread(() -> {
+                    if (requestId != profileRequestId) return;
+                    consumptionProfile = result;
+                    profileLoading = false;
+                    profileLoadFailed = false;
+                    if ("mypage".equals(selectedTab)) showTab("mypage");
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (requestId != profileRequestId) return;
+                    consumptionProfile = legacyProfile;
+                    profileLoading = false;
+                    profileLoadFailed = true;
+                    if ("mypage".equals(selectedTab)) showTab("mypage");
+                });
+            }
+        });
+    }
+
+    private void confirmLogout() {
+        new AlertDialog.Builder(this)
+                .setTitle("로그아웃")
+                .setMessage("계정에서 로그아웃할까요?")
+                .setNegativeButton("취소", null)
+                .setPositiveButton("로그아웃", (dialog, which) -> {
+                    if (logoutInProgress) return;
+                    logoutInProgress = true;
+                    io.execute(() -> {
+                        supabase.logout();
+                        runOnUiThread(() -> {
+                            logoutInProgress = false;
+                            profileRequestId++;
+                            profileLoading = false;
+                            consumptionProfile = null;
+                            editingProfile = false;
+                            showLogin();
+                        });
+                    });
+                })
+                .show();
+    }
 
     private TextView navArrow(String label, Runnable action) {
         TextView arrow = new TextView(this); arrow.setText(label); arrow.setTextSize(28); arrow.setTextColor(0xff71809a); arrow.setGravity(android.view.Gravity.CENTER); arrow.setOnClickListener(v -> action.run()); return arrow;
@@ -412,7 +537,7 @@ public final class MainActivity extends ComponentActivity {
             addTransactionRow(entry);
             if (++shown >= limit) break;
         }
-        if (shown == 0) addText(ledgerLoadError.isEmpty() ? "가계부에 저장된 거래가 없습니다." : "저장하려면 먼저 Supabase 스키마를 실행해 주세요.", 14, 0xff7e8798, false);
+        if (shown == 0) addText(ledgerLoadError.isEmpty() ? "가계부에 저장된 거래가 없습니다." : ledgerLoadError, 14, 0xff7e8798, false);
     }
 
     private void addRecentTransactionsForMonth(YearMonth month) {
@@ -505,114 +630,49 @@ public final class MainActivity extends ComponentActivity {
         try { recorder.stop(); } catch (RuntimeException error) { releaseRecorder(); recordButton.setEnabled(true); recordButton.setText("● 녹음 시작"); showMessage("녹음이 너무 짧습니다. 다시 시도하세요."); return; }
         releaseRecorder();
         File audio = recordingFile;
-        boolean ledgerDestination = recordingForLedger;
         io.execute(() -> {
             try {
                 String text = transcription.transcribe(audio);
                 runOnUiThread(() -> {
-                    if (ledgerDestination) {
-                        ledgerDraft = text;
-                        if (ledgerTextField != null) ledgerTextField.setText(text);
-                        pendingTranscript = text;
-                        if (scriptField != null) scriptField.setText(text);
-                    } else {
-                        pendingTranscript = text;
-                        if (scriptField != null) scriptField.setText(text);
-                    }
-                    if (status != null) status.setText("음성 변환이 완료됐습니다. 내용을 확인하세요.");
+                    ledgerDraft = text;
+                    if (ledgerTextField != null) ledgerTextField.setText(text);
+                    if (status != null) status.setText("인식이 끝났어요. 내용을 확인한 뒤 가계부에 추가해 주세요.");
                 });
-            } catch (Exception error) { runOnUiThread(() -> { if (status != null) status.setText(error.getMessage()); }); }
-            finally { if (audio != null) audio.delete(); recordingFile = null; runOnUiThread(() -> { if (recordButton != null) { recordButton.setEnabled(true); recordButton.setText(recordingForLedger ? "●  음성으로 입력" : "●  음성으로 입력"); } }); }
+            } catch (Exception error) { runOnUiThread(() -> { if (status != null) status.setText("음성을 변환하지 못했어요. 네트워크 연결을 확인하고 다시 시도해 주세요."); }); }
+            finally { if (audio != null) audio.delete(); recordingFile = null; runOnUiThread(() -> { if (recordButton != null) { recordButton.setEnabled(true); recordButton.setText("●  음성으로 입력"); } }); }
         });
     }
 
-    private void saveScript() {
-        String text = scriptField.getText().toString().trim();
-        if (text.isEmpty()) { status.setText("저장할 스크립트를 입력하세요."); return; }
-        pendingTranscript = text;
-        status.setText("저장 중…");
-        io.execute(() -> {
-            try { supabase.insertEntry(text); runOnUiThread(() -> { scriptField.setText(""); pendingTranscript = ""; status.setText("날짜별 음성 기록에 저장했습니다."); refreshEntries(); }); }
-            catch (Exception error) { runOnUiThread(() -> status.setText(error.getMessage())); }
-        });
-    }
-
-    private void analyzeLedger() {
+    private void addLedgerFromText() {
         String transcript = ledgerTextField.getText().toString().trim();
         if (transcript.isEmpty()) { status.setText("먼저 말하거나 스크립트를 입력하세요."); return; }
         ledgerDraft = transcript;
-        status.setText("항목을 정리하고 있어요…");
+        addLedgerButton.setEnabled(false);
+        status.setText("거래 내용을 정리하고 가계부에 추가하고 있어요…");
         io.execute(() -> {
             try {
                 List<ParsedTransaction> result = ledgerParser.parse(transcript);
+                if (result.isEmpty()) {
+                    runOnUiThread(() -> {
+                        status.setText("금액이 포함된 거래를 찾지 못했어요. 문장을 확인해 주세요.");
+                        addLedgerButton.setEnabled(true);
+                    });
+                    return;
+                }
+                supabase.insertLedgerEntries(result);
                 runOnUiThread(() -> {
-                    parsedTransactions = result;
-                    status.setText(result.isEmpty() ? "금액이 포함된 거래를 찾지 못했어요. 스크립트를 확인해 주세요." : "항목과 금액을 확인한 뒤 저장하세요.");
-                    showParsedTransactions();
-                });
-            } catch (Exception error) {
-                runOnUiThread(() -> status.setText(error.getMessage()));
-            }
-        });
-    }
-
-    private void showParsedTransactions() {
-        if (homeContent == null || !"record".equals(selectedTab)) return;
-        LinearLayout preview = new LinearLayout(this);
-        preview.setOrientation(LinearLayout.VERTICAL);
-        for (ParsedTransaction transaction : parsedTransactions) {
-            String label = transaction.transactionType().equals("income") ? "수입" : "지출";
-            String row = transaction.itemName() + "  ·  " + formatAmount(transaction.amount()) + "원\n" + transaction.category() + " / " + label;
-            TextView item = new TextView(this);
-            item.setText(row); item.setTextSize(15); item.setTextColor(0xff34463a);
-            item.setBackground(rounded(0xffffffff, dp(12), 0xffe7ebe3));
-            item.setPadding(dp(14), dp(12), dp(14), dp(12));
-            LinearLayout.LayoutParams params = matchWrap(); params.setMargins(0, dp(4), 0, dp(4));
-            preview.addView(item, params);
-        }
-        homeContent.addView(preview);
-        if (!parsedTransactions.isEmpty()) addButton("확인하고 가계부에 저장", v -> saveLedgerEntries());
-    }
-
-    private void saveLedgerEntries() {
-        if (parsedTransactions.isEmpty()) return;
-        status.setText("가계부에 저장 중…");
-        List<ParsedTransaction> toSave = new ArrayList<>(parsedTransactions);
-        io.execute(() -> {
-            try {
-                supabase.insertLedgerEntries(toSave);
-                runOnUiThread(() -> {
-                    parsedTransactions = new ArrayList<>();
                     ledgerDraft = "";
                     if (ledgerTextField != null) ledgerTextField.setText("");
-                    status.setText("가계부에 저장했습니다.");
-                    showTab("home");
+                    status.setText("가계부에 추가했어요.");
+                    addLedgerButton.setEnabled(true);
                     refreshLedgerEntries();
                 });
             } catch (Exception error) {
-                runOnUiThread(() -> status.setText(error.getMessage()));
-            }
-        });
-    }
-
-    private void refreshEntries() {
-        TextView target = records;
-        io.execute(() -> {
-            try {
-                List<ScriptEntry> entries = supabase.fetchEntries();
                 runOnUiThread(() -> {
-                    if (records != target || target == null) return;
-                    StringBuilder text = new StringBuilder();
-                    String lastDate = "";
-                    for (ScriptEntry entry : entries) {
-                        String date = entry.occurredOn();
-                        if (!date.equals(lastDate)) text.append("\n").append(date).append("\n");
-                        text.append("  ").append(entry.transcript()).append("\n\n");
-                        lastDate = date;
-                    }
-                    records.setText(text.length() == 0 ? "아직 저장된 기록이 없습니다." : text.toString());
+                    status.setText("가계부에 추가하지 못했어요. 내용을 확인하고 다시 시도해 주세요.");
+                    addLedgerButton.setEnabled(true);
                 });
-            } catch (Exception error) { runOnUiThread(() -> { if (records == target && target != null) target.setText(error.getMessage()); }); }
+            }
         });
     }
 
@@ -628,7 +688,7 @@ public final class MainActivity extends ComponentActivity {
             } catch (Exception error) {
                 runOnUiThread(() -> {
                     ledgerEntries = new ArrayList<>();
-                    ledgerLoadError = error.getMessage() == null ? "가계부를 불러오지 못했습니다." : error.getMessage();
+                    ledgerLoadError = "거래 내역을 불러오지 못했어요. 네트워크 연결을 확인해 주세요.";
                     if (homeContent != null && !recording && !"record".equals(selectedTab)) showTab(selectedTab);
                 });
             }
@@ -645,7 +705,7 @@ public final class MainActivity extends ComponentActivity {
 
     private void buildRoot() {
         homeContent = null;
-        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(28, 28, 28, 28); root.setBackgroundColor(0xfff5f7f3);
+        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(22), dp(24), dp(22), dp(24)); root.setBackgroundColor(0xfffffcf7);
         ScrollView scroll = new ScrollView(this); scroll.addView(root); setContentView(scroll);
     }
 

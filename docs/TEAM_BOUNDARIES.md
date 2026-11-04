@@ -20,18 +20,19 @@
 
 담당 기능은 공용 디자인, 홈 화면, 하단 메뉴, 화면 전환 및 공통 UI입니다.
 
-- `MainActivity.java`: `showJournal`, `addNavigationItem`, `showTab`, `showHomeTab`, `navArrow`, `quickCard`, `clickableCard`, 공용 UI 생성 메서드
+- `MainActivity.java`: `showJournal`, `addNavigationItem`, `showTab`, `showHomeTab`, `showMyPageTab`의 화면 구성, `navArrow`, `quickCard`, `clickableCard`, 공용 UI 생성 메서드
 - Android 리소스와 테마를 수정할 수 있습니다.
+- 마이페이지의 레이아웃은 담당하되 인증·로그아웃 동작은 로그인 담당자와 연동합니다.
 - 다른 담당 화면의 기능 처리나 Supabase/API 저장 형식은 변경하지 않습니다. 새 화면 경로를 추가하거나 공용 `showTab` 동작을 바꿀 때는 해당 화면 담당자와 협의합니다.
 
 ### 음성 녹음·스크립트·로그인 담당
 
 이 프로젝트에서 로그인(Auth) 및 음성 원문 기록의 소유자는 이 역할입니다.
 
-- `MainActivity.java`: `showLogin`, `authenticate`, `showRecordTab`, `toggleRecording`, `startRecording`, `stopRecording`, `saveScript`, `refreshEntries`, `releaseRecorder`
+- `MainActivity.java`: `showLogin`, `showAuthScreen`, `addAuthField`, `authenticate`, `confirmLogout`, 마이페이지의 로그아웃 동작, `showRecordTab`, `toggleRecording`, `startRecording`, `stopRecording`, `saveScript`, `refreshEntries`, `releaseRecorder`
 - `mobile/app/src/main/java/com/moa/pbl/data/TranscriptionRepository.java`
 - `mobile/app/src/main/java/com/moa/pbl/data/ScriptEntry.java`
-- `SupabaseRepository.java`의 인증·스크립트 메서드: `authenticate`, `logout`, `insertEntry`, `fetchEntries`
+- `SupabaseRepository.java`의 인증·스크립트 메서드: `authenticate`, `currentAccountEmail`, `logout`, `insertEntry`, `fetchEntries`
 - 전사 백엔드: `backend/app/routers/transcriptions.py`, `backend/app/services/transcription.py`
 - 공유 화면 골격, 공통 내비게이션, 거래 파싱/저장 메서드는 음성 기능 작업 범위가 아닙니다.
 

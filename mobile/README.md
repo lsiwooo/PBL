@@ -27,6 +27,8 @@
 | 자연어 거래 분석 API 호출 | `app/src/main/java/com/moa/pbl/data/LedgerParserRepository.java` |
 | 사용자별 테이블 및 RLS | `supabase/schema.sql` |
 
+하단의 **마이페이지**에서 로그인 계정과 소비 분석 프로필을 확인·수정하고 로그아웃할 수 있습니다. 로그인과 회원가입 화면은 앱의 색상과 카드 스타일에 맞췄습니다.
+
 Android 코드는 Java로 유지합니다. API 요청·응답 또는 데이터베이스 스키마를 변경할 경우 Android 호출부와 루트 README도 함께 갱신합니다.
 
 ## 백엔드 연결

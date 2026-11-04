@@ -7,6 +7,7 @@
 ## 기능
 
 - 이메일과 비밀번호를 사용하는 Supabase Auth 회원가입 및 로그인
+- 마이페이지에서 계정 이메일과 소비 분석 프로필을 확인·수정하고 로그아웃
 - 음성 녹음, 한국어 스크립트 변환, 원문 스크립트 저장
 - 자연어 문장에서 거래 품목, 금액, 수입·지출 유형 및 카테고리 추출
 - 사용자가 분석 결과를 확인한 후 가계부 거래로 저장
@@ -17,8 +18,8 @@
 | 담당 | 작업 범위 | 주요 경로 |
 | --- | --- | --- |
 | 소비 패턴 진단 | 월별 소비 집계, 카테고리별 통계, 소비 피드백 및 비교 기준 | `MainActivity.java`의 `showStatisticsTab`, `showAnalysisTab`, `addDonutCard`, `categoryTotals`, `totalForMonth`; 추후 분석 전용 클래스 |
-| 디자인 및 프론트엔드 | 공용 화면 틀, 디자인 시스템, 하단 메뉴와 화면 이동 | `MainActivity.java`의 `showJournal`, `addNavigationItem`, `showTab`, `showHomeTab`, 공용 뷰 생성 메서드 및 Android 리소스 |
-| 녹음·스크립트·로그인 | 마이크 권한·녹음, 음성 전사, 날짜별 원문 저장, Supabase 로그인·가입·로그아웃 | `MainActivity.java`의 `showLogin`, `authenticate`, `showRecordTab`, `toggleRecording`, `startRecording`, `stopRecording`, `saveScript`, `refreshEntries`; `SupabaseRepository`의 `authenticate`, `logout`, `insertEntry`, `fetchEntries`; `TranscriptionRepository`, `ScriptEntry`; 전사 백엔드 |
+| 디자인 및 프론트엔드 | 공용 화면 틀, 디자인 시스템, 하단 메뉴, 마이페이지 레이아웃 | `MainActivity.java`의 `showJournal`, `addNavigationItem`, `showTab`, `showHomeTab`, 마이페이지 화면 구성, 공용 뷰 메서드 및 Android 리소스 |
+| 녹음·스크립트·로그인 | 마이크 권한·녹음, 음성 전사, 날짜별 원문 저장, Supabase 로그인·가입·로그아웃 | `MainActivity.java`의 인증·전사·스크립트·로그아웃 메서드; `SupabaseRepository`의 인증·스크립트 메서드; `TranscriptionRepository`, `ScriptEntry`; 전사 백엔드 |
 | 챗봇 및 자연어 가계부 | 자연어 거래 분석, 사용자 확인, 거래 저장 및 조회 | `MainActivity.java`의 `analyzeLedger`, `showParsedTransactions`, `saveLedgerEntries`, `refreshLedgerEntries`; `LedgerParserRepository`, `LedgerEntry`, `ParsedTransaction`; `backend/app/routers/ledger.py`, `backend/app/services/ledger_parser.py` |
 
 세부 담당 파일·메서드와 수정 제한은 [`docs/TEAM_BOUNDARIES.md`](docs/TEAM_BOUNDARIES.md)에 정리했습니다. `MainActivity.java`는 화면들이 한 파일에 있는 통합 지점입니다. 각 담당자는 표에 지정된 메서드만 수정하고, 공용 내비게이션·공용 뷰 생성·화면 라우팅 또는 다른 담당자의 메서드를 바꿔야 할 때는 먼저 협의합니다. 팀원별 기능 브랜치를 사용하고 PR에서 통합합니다.

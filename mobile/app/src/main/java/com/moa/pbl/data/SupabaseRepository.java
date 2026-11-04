@@ -43,7 +43,12 @@ public final class SupabaseRepository {
         }
         preferences.edit().putString("access_token", accessToken)
                 .putString("refresh_token", result.optString("refresh_token"))
+                .putString("account_email", email)
                 .putLong("expires_at", System.currentTimeMillis() / 1000L + result.optLong("expires_in", 3600L)).apply();
+    }
+
+    public String currentAccountEmail() {
+        return preferences.getString("account_email", "");
     }
 
     public void logout() {

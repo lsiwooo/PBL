@@ -2,25 +2,27 @@
 
 자연어 문장 또는 음성으로 수입과 지출을 기록하고, 월별 소비 내역과 요약을 확인하는 Android 앱입니다. Android 앱은 Java로 작성했으며, Python 백엔드가 음성 전사와 문장 분석을 처리합니다. Supabase는 계정과 기록을 저장합니다.
 
-현재 실행 대상은 `mobile/`의 Android 앱입니다. 저장소의 `frontend/`는 기존 웹 시안으로, 현재 Android 앱 실행 절차와 연결되어 있지 않습니다. 별도 요청 없이 웹 앱을 현재 제품 흐름으로 간주하지 않습니다.
+현재 실행 대상은 `mobile/`의 Android 앱입니다. `frontend/`는 Android 앱 실행 흐름과 분리된 기존 웹 시안입니다.
 
 ## 기능
 
 - 이메일과 비밀번호를 사용하는 Supabase Auth 회원가입 및 로그인
-- 마이페이지에서 계정 이메일과 소비 분석 프로필을 확인·수정하고 로그아웃
-- 음성 녹음, 한국어 스크립트 변환, 원문 스크립트 저장
+- 마이페이지에서 계정과 선택형 소비 분석 프로필을 관리하고 로그아웃
+- 음성 녹음, 한국어 음성 인식, 인식 문장에서 거래 항목 추출
 - 자연어 문장에서 거래 품목, 금액, 수입·지출 유형 및 카테고리 추출
-- 사용자가 분석 결과를 확인한 후 가계부 거래로 저장
+- 음성 인식 문장을 확인하고 `가계부에 추가하기`를 누르면 거래 항목을 분석해 저장
 - 월별 잔액, 수입·지출, 카테고리별 통계와 소비 요약
+
+또래 소비 비교는 실제 비교 데이터를 준비할 때까지 앱 화면에서 제공하지 않습니다. 소비 분석 프로필은 `consumption_profiles` 테이블에 사용자 계정별로 저장하고 RLS로 본인 계정만 접근하도록 제한합니다. 분석 기능은 이 프로필과 거래 데이터를 사용자 인증 범위에서 조회합니다. 소비 분석 프로필은 생년월일, 직업, 학생의 학교 종류·학교 이름·학년, 시·도를 입력합니다. 프로필은 로그인 계정에 연결해 Supabase에 저장하며 로그아웃해도 유지됩니다.
 
 ## 팀 담당 영역
 
 | 담당 | 작업 범위 | 주요 경로 |
 | --- | --- | --- |
-| 소비 패턴 진단 | 월별 소비 집계, 카테고리별 통계, 소비 피드백 및 비교 기준 | `MainActivity.java`의 `showStatisticsTab`, `showAnalysisTab`, `addDonutCard`, `categoryTotals`, `totalForMonth`; 추후 분석 전용 클래스 |
-| 디자인 및 프론트엔드 | 공용 화면 틀, 디자인 시스템, 하단 메뉴, 마이페이지 레이아웃 | `MainActivity.java`의 `showJournal`, `addNavigationItem`, `showTab`, `showHomeTab`, 마이페이지 화면 구성, 공용 뷰 메서드 및 Android 리소스 |
-| 녹음·스크립트·로그인 | 마이크 권한·녹음, 음성 전사, 날짜별 원문 저장, Supabase 로그인·가입·로그아웃 | `MainActivity.java`의 인증·전사·스크립트·로그아웃 메서드; `SupabaseRepository`의 인증·스크립트 메서드; `TranscriptionRepository`, `ScriptEntry`; 전사 백엔드 |
-| 챗봇 및 자연어 가계부 | 자연어 거래 분석, 사용자 확인, 거래 저장 및 조회 | `MainActivity.java`의 `analyzeLedger`, `showParsedTransactions`, `saveLedgerEntries`, `refreshLedgerEntries`; `LedgerParserRepository`, `LedgerEntry`, `ParsedTransaction`; `backend/app/routers/ledger.py`, `backend/app/services/ledger_parser.py` |
+| 소비 패턴 진단 | 월별 소비 집계, 카테고리별 통계, 전월 비교 및 소비 피드백 | `MainActivity.java`의 `showStatisticsTab`, `showAnalysisTab`, `addDonutCard`, `categoryTotals`, `totalForMonth`; 프로필은 `SupabaseRepository.fetchConsumptionProfile`, 거래는 `fetchLedgerEntries`; DB 테이블 `consumption_profiles`, `ledger_entries` |
+| 디자인 및 프론트엔드 | 공용 화면 틀, 디자인 시스템, 하단 메뉴, 마이페이지와 프로필 입력 화면 | `MainActivity.java`의 `showJournal`, `addNavigationItem`, `showTab`, `showHomeTab`, `showMyPageTab`; `analysis/ProfileFormView.java`, `ConsumptionProfile.java`, `ProfileStore.java`, 공용 뷰 메서드 및 Android 리소스 |
+| 음성 입력·로그인 | 마이크 권한·녹음, 음성 전사, 거래 분석 화면 연결, Supabase 로그인·가입·로그아웃 | `MainActivity.java`의 인증·전사·로그아웃 및 `showRecordTab`, `toggleRecording`, `startRecording`, `stopRecording`; `SupabaseRepository`의 인증 메서드; `TranscriptionRepository`; 전사 백엔드 |
+| 챗봇 및 자연어 가계부 | 자연어 거래 분석·저장 및 거래 조회 | `MainActivity.java`의 `addLedgerFromText`, `refreshLedgerEntries`; `LedgerParserRepository`, `LedgerEntry`, `ParsedTransaction`; `backend/app/routers/ledger.py`, `backend/app/services/ledger_parser.py` |
 
 세부 담당 파일·메서드와 수정 제한은 [`docs/TEAM_BOUNDARIES.md`](docs/TEAM_BOUNDARIES.md)에 정리했습니다. `MainActivity.java`는 화면들이 한 파일에 있는 통합 지점입니다. 각 담당자는 표에 지정된 메서드만 수정하고, 공용 내비게이션·공용 뷰 생성·화면 라우팅 또는 다른 담당자의 메서드를 바꿔야 할 때는 먼저 협의합니다. 팀원별 기능 브랜치를 사용하고 PR에서 통합합니다.
 
@@ -62,7 +64,7 @@ APK 경로: `mobile/app/build/outputs/apk/debug/app-debug.apk`
 2. Supabase Dashboard에서 **SQL Editor → New query**를 열고 `mobile/supabase/schema.sql` 내용을 실행합니다.
 3. Supabase Auth에서 이메일·비밀번호 가입 정책을 구성합니다.
 
-스키마는 `voice_entries`와 `ledger_entries` 테이블, 사용자별 Row Level Security 정책을 설정합니다. 앱에는 Publishable/anon key만 사용합니다. `service_role` 키는 앱이나 저장소에 넣지 않습니다. `local.properties`와 `.env`는 커밋하지 않습니다.
+스키마는 `ledger_entries`, `consumption_profiles` 테이블과 사용자별 Row Level Security 정책을 설정합니다. 음성 원문은 보관하지 않고, 확인 후 추가한 거래만 저장합니다. 앱에는 Publishable/anon key만 사용합니다. `service_role` 키는 앱이나 저장소에 넣지 않습니다. `local.properties`와 `.env`는 커밋하지 않습니다.
 
 ## 백엔드 실행
 

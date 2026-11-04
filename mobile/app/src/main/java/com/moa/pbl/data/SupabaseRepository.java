@@ -3,16 +3,19 @@ package com.moa.pbl.data;
 import android.content.Context;
 import android.content.SharedPreferences;
 import com.moa.pbl.BuildConfig;
+import com.moa.pbl.analysis.ConsumptionProfile;
 import java.time.LocalDate;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -38,8 +41,8 @@ public final class SupabaseRepository {
         JSONObject result = request("POST", endpoint, body, null, null);
         String accessToken = result.optString("access_token");
         if (accessToken.isEmpty()) {
-            if (signup) throw new Exception("가입 요청이 접수됐습니다. 이메일 인증을 마친 뒤 로그인해 주세요.");
-            throw new Exception("로그인 응답에 세션 정보가 없습니다.");
+            if (signup) throw new Exception("가입이 완료되지 않았어요. 입력한 정보를 확인해 주세요.");
+            throw new Exception("로그인하지 못했어요. 다시 시도해 주세요.");
         }
         preferences.edit().putString("access_token", accessToken)
                 .putString("refresh_token", result.optString("refresh_token"))
@@ -51,6 +54,35 @@ public final class SupabaseRepository {
         return preferences.getString("account_email", "");
     }
 
+    public ConsumptionProfile fetchConsumptionProfile() throws Exception {
+        requireSession();
+        String path = "/rest/v1/consumption_profiles?select=birth_date,occupation,school_type,school_name,grade,region&limit=1";
+        JSONArray rows = new JSONArray(requestRaw("GET", path, null, accessToken(), null));
+        if (rows.length() == 0) return null;
+        JSONObject row = rows.getJSONObject(0);
+        return new ConsumptionProfile(
+                LocalDate.parse(row.getString("birth_date")),
+                row.getString("occupation"),
+                row.optString("school_type", ""),
+                row.optString("school_name", ""),
+                row.optInt("grade", 0),
+                row.getString("region")
+        );
+    }
+
+    public void upsertConsumptionProfile(ConsumptionProfile profile) throws Exception {
+        requireSession();
+        JSONObject row = new JSONObject()
+                .put("birth_date", profile.birthDate.toString())
+                .put("occupation", profile.occupation)
+                .put("school_type", profile.schoolType.isEmpty() ? JSONObject.NULL : profile.schoolType)
+                .put("school_name", profile.schoolName.isEmpty() ? JSONObject.NULL : profile.schoolName)
+                .put("grade", profile.grade == 0 ? JSONObject.NULL : profile.grade)
+                .put("region", profile.region);
+        requestRaw("POST", "/rest/v1/consumption_profiles?on_conflict=user_id", row, accessToken(),
+                "resolution=merge-duplicates,return=minimal");
+    }
+
     public void logout() {
         String token = preferences.getString("access_token", "");
         if (!token.isEmpty() && isConfigured()) {
@@ -58,27 +90,6 @@ public final class SupabaseRepository {
             catch (Exception ignored) { /* Local sign-out still clears the saved session. */ }
         }
         preferences.edit().clear().apply();
-    }
-
-    public void insertEntry(String transcript) throws Exception {
-        requireSession();
-        JSONObject item = new JSONObject()
-                .put("transcript", transcript)
-                .put("occurred_on", LocalDate.now().toString());
-        request("POST", "/rest/v1/voice_entries", item, accessToken(), "return=minimal");
-    }
-
-    public List<ScriptEntry> fetchEntries() throws Exception {
-        requireSession();
-        String query = "?select=transcript,created_at,occurred_on&order=occurred_on.desc,created_at.desc&limit=100";
-        String response = requestRaw("GET", "/rest/v1/voice_entries" + query, null, accessToken(), null);
-        JSONArray rows = new JSONArray(response);
-        List<ScriptEntry> entries = new ArrayList<>();
-        for (int index = 0; index < rows.length(); index++) {
-            JSONObject row = rows.getJSONObject(index);
-            entries.add(new ScriptEntry(row.optString("transcript"), row.optString("created_at"), row.optString("occurred_on")));
-        }
-        return entries;
     }
 
     public void insertLedgerEntries(List<ParsedTransaction> transactions) throws Exception {
@@ -140,8 +151,10 @@ public final class SupabaseRepository {
             int code = connection.getResponseCode();
             InputStream stream = code >= 200 && code < 300 ? connection.getInputStream() : connection.getErrorStream();
             String response = stream == null ? "" : readAll(stream);
-            if (code < 200 || code >= 300) throw new Exception(extractMessage(response, code));
+            if (code < 200 || code >= 300) throw new Exception(extractMessage(response, path));
             return response;
+        } catch (IOException connectionError) {
+            throw new Exception("인터넷 연결을 확인하고 다시 시도해 주세요.");
         } finally { connection.disconnect(); }
     }
 
@@ -154,13 +167,22 @@ public final class SupabaseRepository {
         return content.toString();
     }
 
-    private String extractMessage(String body, int status) {
+    private String extractMessage(String body, String path) {
+        String message = "";
         try {
             JSONObject error = new JSONObject(body);
-            String message = error.optString("msg", error.optString("message", error.optString("error_description")));
-            if (!message.isEmpty()) return message;
+            message = error.optString("msg", error.optString("message", error.optString("error_description"))).toLowerCase(Locale.ROOT);
         } catch (Exception ignored) { /* Use the HTTP status when the response is not JSON. */ }
-        return "Supabase 요청에 실패했습니다 (HTTP " + status + "). 프로젝트 URL, 키, 테이블/RLS 설정을 확인하세요.";
+        if (path.startsWith("/rest/v1/consumption_profiles")) return "프로필을 저장하거나 불러오지 못했어요. 다시 시도해 주세요.";
+        if (path.startsWith("/auth/v1/")) {
+            if (message.contains("invalid login credentials")) return "이메일 또는 비밀번호를 확인해 주세요.";
+            if (message.contains("invalid email")) return "이메일 주소를 확인해 주세요.";
+            if (message.contains("already registered") || message.contains("user already exists")) return "이미 가입된 이메일입니다. 로그인해 주세요.";
+            if (message.contains("rate limit")) return "요청이 많습니다. 잠시 후 다시 시도해 주세요.";
+            if (message.contains("password") && (message.contains("length") || message.contains("short"))) return "비밀번호를 확인해 주세요.";
+            return "회원가입 또는 로그인에 실패했어요. 입력한 정보를 확인해 주세요.";
+        }
+        return "기록을 불러오거나 저장하지 못했어요. 잠시 후 다시 시도해 주세요.";
     }
 
     private String accessToken() throws Exception {
@@ -169,11 +191,11 @@ public final class SupabaseRepository {
         long expiresAt = preferences.getLong("expires_at", Long.MAX_VALUE);
         if (expiresAt <= System.currentTimeMillis() / 1000L + 60L) {
             String refreshToken = preferences.getString("refresh_token", "");
-            if (refreshToken.isEmpty()) throw new Exception("로그인 세션이 만료됐습니다. 다시 로그인해 주세요.");
+            if (refreshToken.isEmpty()) throw new Exception("로그인이 만료됐어요. 다시 로그인해 주세요.");
             JSONObject refreshBody = new JSONObject().put("refresh_token", refreshToken);
             JSONObject refreshed = request("POST", "/auth/v1/token?grant_type=refresh_token", refreshBody, null, null);
             String nextToken = refreshed.optString("access_token");
-            if (nextToken.isEmpty()) throw new Exception("로그인 세션이 만료됐습니다. 다시 로그인해 주세요.");
+            if (nextToken.isEmpty()) throw new Exception("로그인이 만료됐어요. 다시 로그인해 주세요.");
             preferences.edit().putString("access_token", nextToken)
                     .putString("refresh_token", refreshed.optString("refresh_token", refreshToken))
                     .putLong("expires_at", System.currentTimeMillis() / 1000L + refreshed.optLong("expires_in", 3600L)).apply();
@@ -184,6 +206,6 @@ public final class SupabaseRepository {
 
     private void requireSession() throws Exception { requireConfigured(); accessToken(); }
     private void requireConfigured() throws Exception {
-        if (!isConfigured()) throw new Exception("Supabase 설정이 없습니다. mobile/local.properties를 확인하세요.");
+        if (!isConfigured()) throw new Exception("서비스에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.");
     }
 }

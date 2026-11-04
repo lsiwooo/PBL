@@ -24,32 +24,43 @@ async def transcribe_audio(audio_file: tuple[str, bytes, str]) -> str:
                 audio_transcription_config=types.AudioTranscriptionConfig(
                     mode="VERBATIM",
                     language_codes=["ko-KR"],
+                    custom_vocabulary=[
+                        "원", "천 원", "만 원", "십만 원", "원화", "금액",
+                        "결제", "입금", "지출", "수입", "월급", "급여", "알바비",
+                        "식비", "카페", "교통비", "생활용품", "텀블러", "빗",
+                    ],
                 ),
             ),
         )
-        text_parts: list[str] = []
+        transcription_parts: list[str] = []
+        fallback_text_parts: list[str] = []
         audio_words: list[str] = []
         for candidate in response.candidates or []:
             if candidate.content is None:
                 continue
             for part in candidate.content.parts or []:
+                transcription = getattr(part, "audio_transcription", None)
+                if transcription is not None:
+                    transcription_text = (getattr(transcription, "text", "") or "").strip()
+                    if transcription_text:
+                        transcription_parts.append(transcription_text)
+                        continue
+                    for word in getattr(transcription, "words", []) or []:
+                        value = (getattr(word, "word", "") or "").strip()
+                        if value:
+                            audio_words.append(value)
+                    continue
+
                 part_text = (part.text or "").strip()
                 if part_text:
-                    text_parts.append(part_text)
-                transcription = getattr(part, "audio_transcription", None)
-                transcription_text = (getattr(transcription, "text", "") or "").strip()
-                if transcription_text:
-                    text_parts.append(transcription_text)
-                    continue
-                for word in getattr(transcription, "words", []) or []:
-                    value = (getattr(word, "word", "") or "").strip()
-                    if value:
-                        audio_words.append(value)
+                    fallback_text_parts.append(part_text)
 
-        if text_parts:
-            return "\n".join(text_parts)
+        if transcription_parts:
+            return "\n".join(transcription_parts)
         if audio_words:
             return " ".join(audio_words)
+        if fallback_text_parts:
+            return "\n".join(fallback_text_parts)
         return (response.text or "").strip()
     finally:
         await async_client.aclose()

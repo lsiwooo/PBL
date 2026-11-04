@@ -1,9 +1,9 @@
 package com.moa.pbl.analysis;
 
+import android.app.DatePickerDialog;
 import android.content.Context;
-import android.graphics.Typeface;
-import android.text.InputType;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -14,74 +14,71 @@ import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
-/** 또래 비교에 필요한 프로필(이름·성별·나이·학교·학년·지역) 입력 폼 */
+/** Optional profile form for future real cohort comparison. */
 public final class ProfileFormView extends LinearLayout {
 
     public interface OnSaved {
-        void onSaved(PeerProfile profile);
+        void onSaved(ConsumptionProfile profile);
     }
 
     private static final int BLUE = 0xff1b4fa3;
     private static final int TEXT = 0xff172642;
     private static final int BORDER = 0xffdfe5dc;
 
-    private final EditText nameInput;
-    private final EditText schoolInput;
-    private final Spinner ageSpinner;
+    private final Button birthDateButton;
+    private final Spinner occupationSpinner;
+    private final TextView schoolLabel;
+    private final Spinner schoolSpinner;
+    private final TextView schoolNameLabel;
+    private final EditText schoolNameField;
+    private final TextView gradeLabel;
+    private final Spinner gradeSpinner;
     private final Spinner regionSpinner;
-    private final List<TextView> genderChips = new ArrayList<>();
-    private final List<TextView> gradeChips = new ArrayList<>();
-    private String gender;
-    private int grade;
+    private LocalDate birthDate;
+    private int lastSchoolPosition;
 
-    public ProfileFormView(Context context, @Nullable PeerProfile initial, OnSaved onSaved) {
+    public ProfileFormView(Context context, @Nullable ConsumptionProfile initial, OnSaved onSaved) {
         super(context);
         setOrientation(VERTICAL);
         setPadding(dp(18), dp(16), dp(18), dp(16));
         setBackground(AnalysisViews.rounded(context, 0xffffffff, 24, 0xffe7e8e8));
 
-        label("이름");
-        nameInput = input("이름", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PERSON_NAME);
+        label("생년월일");
+        birthDateButton = fieldButton("생년월일 선택");
+        addView(birthDateButton, new LayoutParams(-1, dp(48)));
+        birthDateButton.setOnClickListener(v -> showDatePicker());
 
-        label("성별");
-        LinearLayout genderRow = chipRow();
-        for (String value : new String[]{PeerProfile.MALE, PeerProfile.FEMALE}) {
-            TextView chip = chip(value);
-            chip.setOnClickListener(v -> selectGender(value));
-            genderChips.add(chip);
-            genderRow.addView(chip, chipParams());
-        }
+        label("직업");
+        occupationSpinner = spinner(withPrompt(Arrays.asList(ConsumptionProfile.OCCUPATIONS)));
 
-        label("나이");
-        List<String> ages = new ArrayList<>();
-        ages.add("선택하세요");
-        for (int age = PeerProfile.MIN_AGE; age <= PeerProfile.MAX_AGE; age++) ages.add(age + "세");
-        ageSpinner = spinner(ages);
+        schoolLabel = label("학교");
+        schoolSpinner = spinner(withPrompt(Arrays.asList(ConsumptionProfile.SCHOOL_TYPES)));
+        schoolNameLabel = label("학교 이름");
+        schoolNameField = new EditText(context);
+        schoolNameField.setSingleLine(true);
+        schoolNameField.setTextSize(15);
+        schoolNameField.setTextColor(TEXT);
+        schoolNameField.setHint("학교 이름을 입력해 주세요");
+        schoolNameField.setPadding(dp(14), 0, dp(14), 0);
+        schoolNameField.setBackground(AnalysisViews.rounded(context, 0xffffffff, 14, BORDER));
+        addView(schoolNameField, new LayoutParams(-1, dp(48)));
+        gradeLabel = label("학년");
+        gradeSpinner = spinner(withPrompt(gradesFor("")));
+        label("시·도");
+        regionSpinner = spinner(withPrompt(Arrays.asList(ConsumptionProfile.REGIONS)));
 
-        label("학교");
-        schoolInput = input("예: 한국대학교", InputType.TYPE_CLASS_TEXT);
-
-        label("학년");
-        LinearLayout gradeRow = chipRow();
-        for (int value = 1; value <= 4; value++) {
-            final int selected = value;
-            TextView chip = chip(value + "학년");
-            chip.setOnClickListener(v -> selectGrade(selected));
-            gradeChips.add(chip);
-            gradeRow.addView(chip, chipParams());
-        }
-
-        label("지역");
-        List<String> regions = new ArrayList<>();
-        regions.add("선택하세요");
-        for (String region : PeerProfile.REGIONS) regions.add(region);
-        regionSpinner = spinner(regions);
+        TextView note = AnalysisViews.text(context,
+                "프로필 입력은 선택 사항이에요.", 13, 0xff7e8798, false);
+        note.setPadding(0, dp(10), 0, 0);
+        addView(note);
 
         Button save = new Button(context);
-        save.setText("저장하고 또래와 비교하기");
+        save.setText("저장");
         save.setAllCaps(false);
         save.setTextSize(15);
         save.setTextColor(0xffffffff);
@@ -92,55 +89,123 @@ public final class ProfileFormView extends LinearLayout {
         save.setOnClickListener(v -> submit(onSaved));
 
         if (initial != null) {
-            nameInput.setText(initial.name);
-            schoolInput.setText(initial.school);
-            selectGender(initial.gender);
-            selectGrade(initial.grade);
-            ageSpinner.setSelection(initial.age - PeerProfile.MIN_AGE + 1);
-            regionSpinner.setSelection(indexOf(PeerProfile.REGIONS, initial.region) + 1);
+            birthDate = initial.birthDate;
+            birthDateButton.setText(birthDate.toString());
+            setSelection(occupationSpinner, initial.occupation);
+            updateStudentFields();
+            if (ConsumptionProfile.STUDENT.equals(initial.occupation)) {
+                setSelection(schoolSpinner, initial.schoolType);
+                schoolNameField.setText(initial.schoolName);
+                updateGrades(false);
+                setSelection(gradeSpinner, initial.grade + "학년");
+            }
+            setSelection(regionSpinner, initial.region);
+        } else {
+            updateStudentFields();
         }
+        lastSchoolPosition = schoolSpinner.getSelectedItemPosition();
+        schoolSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                if (position != lastSchoolPosition) {
+                    lastSchoolPosition = position;
+                    updateGrades(true);
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+        });
+        occupationSpinner.setOnItemSelectedListener(new SimpleSelectionListener(this::updateStudentFields));
     }
 
     private void submit(OnSaved onSaved) {
-        String name = nameInput.getText().toString().trim();
-        String school = schoolInput.getText().toString().trim();
-        int agePosition = ageSpinner.getSelectedItemPosition();
-        int regionPosition = regionSpinner.getSelectedItemPosition();
-        if (name.isEmpty() || school.isEmpty() || gender == null || grade == 0
-                || agePosition == 0 || regionPosition == 0) {
-            Toast.makeText(getContext(), "모든 항목을 입력해 주세요.", Toast.LENGTH_SHORT).show();
+        if (birthDate == null || birthDate.isAfter(LocalDate.now())) {
+            Toast.makeText(getContext(), "생년월일을 확인해 주세요.", Toast.LENGTH_SHORT).show();
             return;
         }
-        onSaved.onSaved(new PeerProfile(name, gender, PeerProfile.MIN_AGE + agePosition - 1,
-                school, grade, PeerProfile.REGIONS[regionPosition - 1]));
+        int occupationPosition = occupationSpinner.getSelectedItemPosition();
+        int regionPosition = regionSpinner.getSelectedItemPosition();
+        if (occupationPosition == 0 || regionPosition == 0) {
+            Toast.makeText(getContext(), "직업과 시·도를 선택해 주세요.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String occupation = ConsumptionProfile.OCCUPATIONS[occupationPosition - 1];
+        String schoolType = "";
+        String schoolName = "";
+        int grade = 0;
+        if (ConsumptionProfile.STUDENT.equals(occupation)) {
+            int schoolPosition = schoolSpinner.getSelectedItemPosition();
+            int gradePosition = gradeSpinner.getSelectedItemPosition();
+            schoolName = schoolNameField.getText().toString().trim();
+            if (schoolPosition == 0 || gradePosition == 0 || schoolName.isEmpty()) {
+                Toast.makeText(getContext(), "학교와 학교 이름, 학년을 입력해 주세요.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            schoolType = ConsumptionProfile.SCHOOL_TYPES[schoolPosition - 1];
+            grade = gradePosition;
+        }
+        String region = ConsumptionProfile.REGIONS[regionPosition - 1];
+        onSaved.onSaved(new ConsumptionProfile(birthDate, occupation, schoolType, schoolName, grade, region));
     }
 
-    private void selectGender(String value) {
-        gender = value;
-        String[] values = {PeerProfile.MALE, PeerProfile.FEMALE};
-        for (int i = 0; i < genderChips.size(); i++) styleChip(genderChips.get(i), values[i].equals(value));
+    private void showDatePicker() {
+        LocalDate initial = birthDate == null ? LocalDate.now().minusYears(20) : birthDate;
+        DatePickerDialog dialog = new DatePickerDialog(getContext(), (picker, year, month, day) -> {
+            birthDate = LocalDate.of(year, month + 1, day);
+            birthDateButton.setText(birthDate.toString());
+        }, initial.getYear(), initial.getMonthValue() - 1, initial.getDayOfMonth());
+        dialog.getDatePicker().setMaxDate(System.currentTimeMillis());
+        dialog.show();
     }
 
-    private void selectGrade(int value) {
-        grade = value;
-        for (int i = 0; i < gradeChips.size(); i++) styleChip(gradeChips.get(i), i + 1 == value);
+    private void updateStudentFields() {
+        boolean student = occupationSpinner.getSelectedItemPosition() > 0
+                && ConsumptionProfile.STUDENT.equals(occupationSpinner.getSelectedItem().toString());
+        schoolLabel.setVisibility(student ? VISIBLE : GONE);
+        schoolSpinner.setVisibility(student ? VISIBLE : GONE);
+        schoolNameLabel.setVisibility(student ? VISIBLE : GONE);
+        schoolNameField.setVisibility(student ? VISIBLE : GONE);
+        gradeLabel.setVisibility(student ? VISIBLE : GONE);
+        gradeSpinner.setVisibility(student ? VISIBLE : GONE);
+        if (student) updateGrades(false);
     }
 
-    private void label(String value) {
+    private void updateGrades(boolean clearSelection) {
+        if (gradeSpinner == null) return;
+        String schoolType = schoolSpinner.getSelectedItemPosition() > 0
+                ? schoolSpinner.getSelectedItem().toString() : "";
+        List<String> grades = withPrompt(gradesFor(schoolType));
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(getContext(), android.R.layout.simple_spinner_item, grades);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        gradeSpinner.setAdapter(adapter);
+        if (!clearSelection && grades.size() > 1) gradeSpinner.setSelection(1);
+    }
+
+    private static List<String> gradesFor(String schoolType) {
+        int count;
+        if ("초등학교".equals(schoolType)) count = 6;
+        else if ("중학교".equals(schoolType) || "고등학교".equals(schoolType)) count = 3;
+        else if ("대학교".equals(schoolType)) count = 6;
+        else count = 0;
+        List<String> grades = new ArrayList<>();
+        for (int grade = 1; grade <= count; grade++) grades.add(grade + "학년");
+        return grades;
+    }
+
+    private TextView label(String value) {
         TextView view = AnalysisViews.text(getContext(), value, 13, 0xff7e8798, true);
         view.setPadding(0, dp(10), 0, dp(4));
         addView(view);
+        return view;
     }
 
-    private EditText input(String hint, int inputType) {
-        EditText input = new EditText(getContext());
-        input.setHint(hint);
-        input.setSingleLine(true);
-        input.setInputType(inputType);
-        input.setPadding(dp(14), dp(10), dp(14), dp(10));
-        input.setBackground(AnalysisViews.rounded(getContext(), 0xffffffff, 14, BORDER));
-        addView(input, new LayoutParams(-1, -2));
-        return input;
+    private Button fieldButton(String value) {
+        Button button = new Button(getContext());
+        button.setText(value);
+        button.setAllCaps(false);
+        button.setTextColor(TEXT);
+        button.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        button.setPadding(dp(14), 0, dp(14), 0);
+        button.setBackground(AnalysisViews.rounded(getContext(), 0xffffffff, 14, BORDER));
+        return button;
     }
 
     private Spinner spinner(List<String> items) {
@@ -154,41 +219,35 @@ public final class ProfileFormView extends LinearLayout {
         return spinner;
     }
 
-    private LinearLayout chipRow() {
-        LinearLayout row = new LinearLayout(getContext());
-        addView(row, new LayoutParams(-1, -2));
-        return row;
+    private static List<String> withPrompt(List<String> values) {
+        List<String> result = new ArrayList<>();
+        result.add("선택하세요");
+        result.addAll(values);
+        return result;
     }
 
-    private TextView chip(String value) {
-        TextView chip = new TextView(getContext());
-        chip.setText(value);
-        chip.setTextSize(14);
-        chip.setGravity(Gravity.CENTER);
-        chip.setPadding(0, dp(10), 0, dp(10));
-        styleChip(chip, false);
-        return chip;
+    private static void setSelection(Spinner spinner, String value) {
+        if (value == null) return;
+        for (int position = 0; position < spinner.getCount(); position++) {
+            if (value.equals(spinner.getItemAtPosition(position))) {
+                spinner.setSelection(position);
+                return;
+            }
+        }
     }
 
-    private LayoutParams chipParams() {
-        LayoutParams params = new LayoutParams(0, -2, 1);
-        params.setMargins(dp(3), 0, dp(3), 0);
-        return params;
-    }
-
-    private void styleChip(TextView chip, boolean selected) {
-        chip.setTextColor(selected ? 0xffffffff : TEXT);
-        chip.setTypeface(null, selected ? Typeface.BOLD : Typeface.NORMAL);
-        chip.setBackground(AnalysisViews.rounded(getContext(), selected ? BLUE : 0xffffffff, 14,
-                selected ? BLUE : BORDER));
+    private static void setSelection(Spinner spinner, int grade) {
+        if (grade > 0 && grade < spinner.getCount()) spinner.setSelection(grade);
     }
 
     private int dp(int value) {
         return AnalysisViews.dp(getContext(), value);
     }
 
-    private static int indexOf(String[] items, String value) {
-        for (int i = 0; i < items.length; i++) if (items[i].equals(value)) return i;
-        return -1;
+    private static final class SimpleSelectionListener implements android.widget.AdapterView.OnItemSelectedListener {
+        private final Runnable action;
+        SimpleSelectionListener(Runnable action) { this.action = action; }
+        @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) { action.run(); }
+        @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
     }
 }

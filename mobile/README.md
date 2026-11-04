@@ -22,12 +22,12 @@
 | 기능 | 주요 파일 |
 | --- | --- |
 | 앱 화면 및 하단 메뉴 | `app/src/main/java/com/moa/pbl/MainActivity.java` |
-| Supabase 인증 및 기록 저장 | `app/src/main/java/com/moa/pbl/data/SupabaseRepository.java` |
+| Supabase 인증, 거래 및 프로필 저장·조회 | `app/src/main/java/com/moa/pbl/data/SupabaseRepository.java` |
 | 음성 전사 API 호출 | `app/src/main/java/com/moa/pbl/data/TranscriptionRepository.java` |
 | 자연어 거래 분석 API 호출 | `app/src/main/java/com/moa/pbl/data/LedgerParserRepository.java` |
-| 사용자별 테이블 및 RLS | `supabase/schema.sql` |
+| 사용자별 거래·프로필 테이블과 RLS | `supabase/schema.sql` |
 
-하단의 **마이페이지**에서 로그인 계정과 소비 분석 프로필을 확인·수정하고 로그아웃할 수 있습니다. 로그인과 회원가입 화면은 앱의 색상과 카드 스타일에 맞췄습니다.
+하단의 **마이페이지**에서 로그인 계정을 확인하고 로그아웃할 수 있습니다. 선택형 프로필에는 생년월일, 직업, 학생의 학교 종류·학교 이름·학년, 시·도를 입력합니다. 프로필은 `consumption_profiles` 테이블에 로그인 계정별로 저장하며 로그아웃해도 유지됩니다. RLS는 사용자 본인의 프로필만 허용합니다. 소비 분석은 인증된 사용자 범위의 프로필과 거래 데이터를 사용합니다. 실제 비교 데이터가 준비되기 전까지 또래 비교 화면은 비활성화되어 있습니다.
 
 Android 코드는 Java로 유지합니다. API 요청·응답 또는 데이터베이스 스키마를 변경할 경우 Android 호출부와 루트 README도 함께 갱신합니다.
 

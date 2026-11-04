@@ -1,12 +1,9 @@
-import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.services.ledger_parser import parse_ledger_text
-
-logger = logging.getLogger("uvicorn.error")  # 서버 터미널에 진짜 오류를 보여주기 위함
 
 router = APIRouter(prefix="/api/v1/ledger", tags=["ledger"])
 
@@ -31,6 +28,5 @@ async def parse_transactions(request: ParseRequest) -> ParseResponse:
     try:
         transactions = await parse_ledger_text(request.transcript)
     except Exception as error:
-        logger.exception("ledger parse failed")
         raise HTTPException(status_code=502, detail="스크립트에서 가계부 항목을 추출하지 못했어요. 다시 시도해 주세요.") from error
     return ParseResponse(transactions=transactions)

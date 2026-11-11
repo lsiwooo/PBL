@@ -33,7 +33,11 @@ import com.moa.pbl.analysis.ProfileFormView;
 import com.moa.pbl.analysis.ProfileStore;
 import com.moa.pbl.analysis.PeerComparison;
 import com.moa.pbl.analysis.PeerDataGenerator;
-import com.moa.pbl.analysis.PeerViews;
+import com.moa.pbl.analysis.AnalysisMonth;
+import com.moa.pbl.analysis.GenderPreference;
+import com.moa.pbl.analysis.MonthComparison;
+import com.moa.pbl.analysis.ReportViews;
+
 import java.io.File;
 import java.text.NumberFormat;
 import java.time.LocalDate;
@@ -334,49 +338,49 @@ public final class MainActivity extends ComponentActivity {
     private void showAnalysisTab() {
         addText("소비 피드백", 27, 0xff172642, false);
         addText("데이터로 나의 소비 습관을 돌아봐요", 15, 0xff7e8798, false);
-        YearMonth thisMonth = YearMonth.now();
-        YearMonth lastMonth = thisMonth.minusMonths(1);
-        long expenses = totalForMonth("expense", thisMonth);
-        long income = totalForMonth("income", thisMonth);
-        Map<String, Long> categories = categoryTotals(thisMonth);
-        boolean hasRecords = expenses > 0L;
 
-        if (!hasRecords) {
-            addCardLabel("거래를 기록하면 소비 피드백이 생겨요", "가계부에 품목과 금액을 저장하면 월간 소비 습관을 볼 수 있습니다.");
-            addButton("자연어로 기록하기", v -> showTab("record"));
-        } else {
-            String topCategory = "기타"; long topAmount = 0L;
-            for (Map.Entry<String, Long> entry : categories.entrySet()) if (entry.getValue() > topAmount) { topCategory = entry.getKey(); topAmount = entry.getValue(); }
-            int share = Math.round(topAmount * 100f / expenses);
-            addCardLabel("이번 달 가장 큰 지출은 " + topCategory + MonthlySpendingFeedback.categoryCopula(topCategory), "이번 달 지출의 " + share + "%를 차지해요. 거래 내역을 살펴보고 다음 달 예산을 정해보세요.");
-            addCardLabel("이번 달 지출", formatAmount(expenses) + "원 · 등록된 " + ledgerEntries.size() + "건을 기준으로 계산했어요.");
+        // 월 선택: 거래가 없어도 항상 기본 화면이 보이도록 아래 카드들을 모두 그린다
+        YearMonth month = AnalysisMonth.get();
+        homeContent.addView(ReportViews.monthSelector(this, month, !AnalysisMonth.isCurrent(),
+                () -> { AnalysisMonth.previous(); showTab("feedback"); },
+                () -> { AnalysisMonth.next(); showTab("feedback"); }), AnalysisViews.cardParams(this));
 
-            addText("지난달과 비교", 19, 0xff172642, true);
-            LinearLayout monthCard = AnalysisViews.card(this);
-            for (String line : MonthlySpendingFeedback.compareMonths(expenses, totalForMonth("expense", lastMonth), categories, categoryTotals(lastMonth)))
-                monthCard.addView(AnalysisViews.text(this, "• " + line, 14, 0xff294a37, false));
-            homeContent.addView(monthCard, AnalysisViews.cardParams(this));
-        }
+        long income = totalForMonth("income", month);
+        long expenses = totalForMonth("expense", month);
+        Map<String, Long> categories = categoryTotals(month);
 
-        // 또래 비교: 마이페이지 프로필(나이·직업)로 비슷한 테스트 사용자 평균과 비교
-        addText("또래와 비교", 19, 0xff172642, true);
+        // 1. 선택한 달의 카테고리별 지출 도넛
+        homeContent.addView(ReportViews.donutCard(this, month, categories), AnalysisViews.cardParams(this));
+        if (expenses == 0L && AnalysisMonth.isCurrent()) addButton("자연어로 기록하기", v -> showTab("record"));
+
+        // 2. 이전 달과 항목별 비율 변화
+        MonthComparison.Result monthResult = MonthComparison.compare(month, categories, categoryTotals(month.minusMonths(1)));
+        homeContent.addView(ReportViews.monthChangeCard(this, monthResult), AnalysisViews.cardParams(this));
+
+        // 3. 같은 성별·지역·연령대와 소비 구성 비교 (프로필은 마이페이지 것을 읽기만 한다)
         ConsumptionProfile profile = consumptionProfile;
         if (profile == null) {
-            addCardLabel("마이페이지에서 프로필을 등록해 주세요", "생년월일과 직업을 등록하면 비슷한 사용자와 이번 달 소비를 비교해 드려요.");
-            addButton("프로필 등록하러 가기", v -> showTab("mypage"));
+            addCardLabel("또래와 비교하려면 프로필이 필요해요", "마이페이지에서 생년월일과 지역을 등록하면 같은 성별·지역·연령대와 소비 구성을 비교해 드려요.");
+            addButton("마이페이지로 가기", v -> showTab("mypage"));
             return;
         }
-        if (!hasRecords) {
-            addCardLabel("이번 달 거래를 기록하면 또래와 비교해 드려요", "등록한 프로필의 나이와 직업을 기준으로 비교해요.");
+        String account = supabase.currentAccountEmail();
+        String gender = GenderPreference.load(this, account);
+        if (gender == null) {
+            homeContent.addView(ReportViews.genderPickerCard(this, picked -> {
+                GenderPreference.save(this, account, picked);
+                showTab("feedback");
+            }), AnalysisViews.cardParams(this));
             return;
         }
-        PeerComparison.Result result = PeerComparison.compare(income, expenses, categories,
-                profile.ageOn(LocalDate.now()), profile.occupation, PeerDataGenerator.getDefault());
-        homeContent.addView(PeerViews.comparisonCard(this, result), AnalysisViews.cardParams(this));
-        homeContent.addView(PeerViews.feedbackCard(this, result), AnalysisViews.cardParams(this));
+        int age = profile.birthDate == null ? -1 : profile.ageOn(month.atEndOfMonth());
+        PeerComparison.Result peerResult = PeerComparison.compare(income, categories, gender, profile.region, age,
+                PeerDataGenerator.getDefault());
+        homeContent.addView(ReportViews.compositionCard(this, month, peerResult, () -> {
+            GenderPreference.clear(this, account);
+            showTab("feedback");
+        }), AnalysisViews.cardParams(this));
     }
-
-
     private void showMyPageTab() {
         addText("마이페이지", 27, 0xff172642, true);
         addText("계정과 소비 분석 프로필을 관리해요", 15, 0xff7e8798, false);

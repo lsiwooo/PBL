@@ -19,8 +19,8 @@ logger = logging.getLogger("uvicorn.error")  # 서버 터미널에 진행 상황
 # 앱 화면(MainActivity)이 쓰는 카테고리 이름과 맞춥니다. 목록 밖의 값은 '기타'로 바꿉니다.
 CATEGORIES = ["식비", "카페", "교통", "쇼핑", "생활", "의료", "문화", "교육", "급여", "용돈", "기타"]
 
-MAX_ATTEMPTS = 2        # 모델 하나당 시도 횟수 (503이면 같은 모델을 오래 붙잡기보다 빨리 다음 모델로 넘어갑니다)
-PER_CALL_TIMEOUT = 20   # Gemini 한 번 호출을 기다리는 최대 시간(초)
+MAX_ATTEMPTS = 3        # 모델 하나당 시도 횟수
+PER_CALL_TIMEOUT = 15   # Gemini 한 번 호출을 기다리는 최대 시간(초). 정상이면 보통 2~6초
 TOTAL_BUDGET = 50       # 전체 최대 시간(초). 앱의 응답 대기(60초)보다 짧게 잡아 앱이 먼저 포기하지 않게 함
 
 SYSTEM_PROMPT = f"""당신은 한국어 가계부 문장 분석기입니다.
@@ -65,23 +65,15 @@ def _is_transient(error: Exception) -> bool:
 
 
 def _model_candidates() -> list[str]:
-    """기본 모델 + 대기(fallback) 모델 순서. 빈 값과 중복은 건너뜁니다."""
-    configured = [
-        settings.gemini_ledger_model,
-        settings.gemini_ledger_fallback_model,
-        settings.gemini_ledger_fallback_model_2,
-        settings.gemini_ledger_fallback_model_3,
-    ]
-    models: list[str] = []
-    for name in configured:
-        name = (name or "").strip()
-        if name and name not in models:
-            models.append(name)
+    models = [settings.gemini_ledger_model]
+    fallback = settings.gemini_ledger_fallback_model
+    if fallback and fallback not in models:
+        models.append(fallback)
     return models
 
 
 async def _generate_with_fallback(async_client, transcript: str):
-    """일시적 오류/시간 초과면 재시도하고, 계속 실패하면 다음 모델로 전환합니다.
+    """모델이 바쁘면(503/429) 잠깐 기다렸다 재시도하고, 응답이 멈추면(시간 초과) 바로 다음 모델로 넘어갑니다.
 
     전체 대기 시간은 TOTAL_BUDGET 을 넘기지 않아서, 앱이 timeout 으로 끊기기 전에
     서버가 먼저 명확한 오류를 돌려줍니다.
@@ -118,6 +110,8 @@ async def _generate_with_fallback(async_client, transcript: str):
                 logger.warning("ledger parse failed: model=%s attempt=%d/%d %.1fs -> %s: %s",
                                model, attempt + 1, MAX_ATTEMPTS, loop.time() - started,
                                type(error).__name__, str(error)[:300])
+                if isinstance(error, asyncio.TimeoutError):
+                    break  # 응답이 멈춘 모델은 같은 모델로 다시 기다리지 않고 다음 모델로 전환
                 if not _is_transient(error):
                     raise
                 if attempt < MAX_ATTEMPTS - 1:

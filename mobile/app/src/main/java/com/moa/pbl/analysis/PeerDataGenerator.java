@@ -7,27 +7,26 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-/** 또래 비교용 테스트 사용자 데이터 (성별·지역·나이, 한 달 수입·카테고리별 지출) */
+/** 또래 비교용 테스트 사용자 데이터 (성별·지역·나이, 한 달 수입·묶음별 지출) */
 public final class PeerDataGenerator {
 
     /**
      * 테스트 사용자 수. 성별 2 × 지역 16 × 나이 18 조합에 고르게 배치한다.
-     * 1,000명이면 같은 성별·지역·5살 연령대 그룹에 평균 8~9명이 들어간다. 늘리면 그룹 인원이 늘어난다.
+     * 1,000명이면 같은 연령대·성별 그룹에 약 140명, 같은 지역 또래 그룹에 약 17명이 들어간다.
+     * 숫자를 바꾸면 그룹 인원이 같이 바뀐다.
      */
     public static final int PEER_COUNT = 1000;
 
     public static final int MIN_AGE = 18;
     public static final int MAX_AGE = 35;
 
-    /** 카테고리별 월 지출 범위(만 원). CategoryPalette.EXPENSE_CATEGORIES와 순서가 같다. */
+    /** 묶음별 월 지출 범위(만 원). CategoryPalette.EXPENSE_CATEGORIES와 순서가 같다. */
     private static final double[][] RANGES = {
-            {25, 45}, {3, 12}, {3, 10}, {3, 25}, {5, 40}, {0, 8}, {2, 15}, {0, 15}, {1, 8}
+            {28, 57}, {5, 48}, {3, 10}, {5, 40}, {1, 23}
     };
 
-    /** 나이가 많을수록 커지는 카테고리 (식비, 교통, 생활) */
-    private static final boolean[] AGE_SCALED = {
-            true, false, true, false, true, false, false, false, false
-    };
+    /** 나이가 많을수록 커지는 묶음 (식비, 생활, 교통) */
+    private static final boolean[] AGE_SCALED = {true, true, true, false, false};
 
     public static final class PeerRecord {
         public final String gender;

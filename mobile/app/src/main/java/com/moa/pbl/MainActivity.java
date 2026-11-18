@@ -37,6 +37,7 @@ import com.moa.pbl.analysis.AnalysisMonth;
 import com.moa.pbl.analysis.GenderPreference;
 import com.moa.pbl.analysis.MonthComparison;
 import com.moa.pbl.analysis.ReportViews;
+import com.moa.pbl.analysis.SpendingCalendar;
 
 import java.io.File;
 import java.text.NumberFormat;
@@ -330,11 +331,32 @@ public final class MainActivity extends ComponentActivity {
         addTo(summary, formatAmount(expenses) + "원", 34, 0xffffffff, true);
         addTo(summary, "총수입  " + formatAmount(income) + "원     남은 금액  " + formatAmount(income - expenses) + "원", 14, 0xffe1eafb, false);
         LinearLayout.LayoutParams summaryParams = matchWrap(); summaryParams.setMargins(0, dp(12), 0, dp(16)); homeContent.addView(summary, summaryParams);
+
+        // 소비 달력: 날짜별 지출 합계 (거래가 없어도 빈 달력이 보인다)
+        Map<Integer, Long> daily = new LinkedHashMap<>();
+        for (LedgerEntry entry : ledgerEntries) {
+            if (!entry.transactionType().equals("expense") || !entry.occurredOn().startsWith(selectedMonth.toString())) continue;
+            int day = SpendingCalendar.dayOf(entry.occurredOn());
+            if (day > 0) daily.merge(day, entry.amount(), Long::sum);
+        }
+        homeContent.addView(SpendingCalendar.card(this, selectedMonth, daily, () -> showTab("stats")), AnalysisViews.cardParams(this));
+
+        // 달력에서 고른 날의 거래
+        LocalDate pickedDay = SpendingCalendar.selectedDate(selectedMonth);
+        if (pickedDay != null) {
+            addText(pickedDay.getMonthValue() + "월 " + pickedDay.getDayOfMonth() + "일 내역", 19, 0xff172642, true);
+            int shown = 0;
+            for (LedgerEntry entry : ledgerEntries) {
+                if (!entry.occurredOn().startsWith(pickedDay.toString())) continue;
+                addTransactionRow(entry); shown++;
+            }
+            if (shown == 0) addText("이 날은 기록이 없어요.", 14, 0xff7e8798, false);
+        }
+
         addDonutCard(expenses);
         addText("거래 내역", 19, 0xff172642, true);
         addRecentTransactionsForMonth(selectedMonth);
     }
-
     private void showAnalysisTab() {
         addText("소비 피드백", 27, 0xff172642, false);
         addText("데이터로 나의 소비 습관을 돌아봐요", 15, 0xff7e8798, false);
@@ -541,23 +563,8 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void addDonutCard(long expenses) {
-        LinearLayout card = new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL); card.setPadding(dp(18), dp(16), dp(18), dp(16)); card.setBackground(rounded(0xffffffff, dp(24), 0xffe7e8e8));
-        addTo(card, "카테고리별 지출", 19, 0xff172642, false);
-        Map<String, Long> totals = categoryTotals(selectedMonth);
-        if (totals.isEmpty()) addTo(card, "아직 이 달의 지출이 없습니다.", 14, 0xff7e8798, false);
-        else {
-            DonutView donut = new DonutView(this, new ArrayList<>(totals.values()), expenses);
-            card.addView(donut, new LinearLayout.LayoutParams(-1, dp(220)));
-            int[] colors = {0xff1b4fa3, 0xff6484bc, 0xffc7d9d0, 0xffe8d6a4, 0xffd9dce3, 0xffa7b4cc};
-            int index = 0;
-            for (Map.Entry<String, Long> entry : totals.entrySet()) {
-                int share = expenses == 0 ? 0 : Math.round(entry.getValue() * 100f / expenses);
-                addTo(card, "●   " + entry.getKey() + "     " + formatAmount(entry.getValue()) + "원     " + share + "%", 14, colors[index++ % colors.length], true);
-            }
-        }
-        LinearLayout.LayoutParams params = matchWrap(); params.setMargins(0, 0, 0, dp(16)); homeContent.addView(card, params);
+        homeContent.addView(ReportViews.donutCard(this, selectedMonth, categoryTotals(selectedMonth)), AnalysisViews.cardParams(this));
     }
-
     private void addRecentTransactions(int limit) {
         int shown = 0;
         for (LedgerEntry entry : ledgerEntries) {

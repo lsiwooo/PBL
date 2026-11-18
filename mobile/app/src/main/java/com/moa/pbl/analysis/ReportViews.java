@@ -14,7 +14,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-/** 소비 피드백 화면의 카드들. 화면 코드만 있고 계산은 PeerComparison·MonthComparison이 한다. */
+/** 소비 화면의 카드들. 화면 코드만 있고 계산은 PeerComparison·MonthComparison이 한다. */
 public final class ReportViews {
 
     public interface OnGenderPicked {
@@ -25,8 +25,6 @@ public final class ReportViews {
     private static final int MUTED = 0xff7e8798;
     private static final int GREEN_TEXT = 0xff294a37;
     private static final int BLUE = 0xff1b4fa3;
-    private static final int PEER_BAR = 0xffc9d1de;
-    private static final int PREVIOUS_BAR = 0xffc9d1de;
     private static final int UP = 0xffa23f35;
     private static final int DOWN = 0xff397458;
 
@@ -56,7 +54,7 @@ public final class ReportViews {
         return row;
     }
 
-    // ───────── 1. 카테고리별 지출 도넛 ─────────
+    // ───────── 묶음별 지출 도넛 ─────────
 
     public static View donutCard(Context context, YearMonth month, Map<String, Long> rawCategories) {
         Map<String, Long> categories = CategoryPalette.normalize(rawCategories);
@@ -93,55 +91,51 @@ public final class ReportViews {
             line.addView(share, new LinearLayout.LayoutParams(dp(context, 64), -2));
             card.addView(line);
         }
+        card.addView(text(context, "※ 식비=식비·카페, 생활=생활·의료, 쇼핑·여가=쇼핑·문화, 교육·기타=교육·기타", 11, MUTED, false));
         return card;
     }
 
-    // ───────── 2. 지난달과 비교 ─────────
+    // ───────── 지난달과 비교 (띠그래프) ─────────
 
     public static View monthChangeCard(Context context, MonthComparison.Result result) {
         String now = AnalysisMonth.shortLabel(result.current);
         String before = AnalysisMonth.shortLabel(result.previous);
 
         LinearLayout card = AnalysisViews.card(context);
-        card.addView(text(context, before + "과 " + now + " 비교", 17, TEXT, true));
+        card.addView(text(context, before + "과 " + now + " 소비 구성 비교", 17, TEXT, true));
         for (String line : result.summary) card.addView(text(context, "• " + line, 14, GREEN_TEXT, false));
-        card.addView(legend(context, before, PREVIOUS_BAR, now, BLUE));
+        card.addView(categoryLegend(context, false));
 
-        long max = 1L;
-        for (MonthComparison.Row row : result.rows) max = Math.max(max, Math.max(row.current, row.previous));
+        card.addView(bandRow(context, before, MonthComparison.won(result.previousTotal), segments(result.previousAmounts, false)));
+        card.addView(bandRow(context, now, MonthComparison.won(result.currentTotal), segments(result.currentAmounts, false)));
 
-        for (MonthComparison.Row row : result.rows) {
-            LinearLayout block = new LinearLayout(context);
-            block.setOrientation(LinearLayout.VERTICAL);
-            block.setPadding(0, dp(context, 8), 0, dp(context, 2));
-
-            LinearLayout head = new LinearLayout(context);
-            head.setGravity(Gravity.CENTER_VERTICAL);
-            head.addView(dot(context, CategoryPalette.colorOf(row.category)), dotParams(context));
-            head.addView(text(context, row.category, 14, TEXT, true), new LinearLayout.LayoutParams(0, -2, 1));
-            double change = row.shareChange();
-            int changeColor = change >= 3 ? UP : change <= -3 ? DOWN : MUTED;
-            head.addView(text(context, MonthComparison.pp(change), 13, changeColor, true));
-            block.addView(head);
-
-            block.addView(bar(context, row.previous, max, PREVIOUS_BAR));
-            block.addView(bar(context, row.current, max, CategoryPalette.colorOf(row.category)));
-            block.addView(text(context,
-                    before + " " + PeerComparison.percent(row.previousShare) + " → " + now + " "
-                            + PeerComparison.percent(row.currentShare) + " · " + MonthComparison.signedWon(row.current - row.previous),
-                    12, MUTED, false));
-            card.addView(block);
+        if (result.currentTotal > 0L || result.previousTotal > 0L) {
+            for (MonthComparison.Row row : result.rows) {
+                if (row.current == 0L && row.previous == 0L) continue;
+                LinearLayout line = new LinearLayout(context);
+                line.setGravity(Gravity.CENTER_VERTICAL);
+                line.setPadding(0, dp(context, 4), 0, 0);
+                line.addView(dot(context, CategoryPalette.colorOf(row.category)), dotParams(context));
+                line.addView(text(context, row.category, 13, TEXT, true), new LinearLayout.LayoutParams(dp(context, 70), -2));
+                line.addView(text(context, PeerComparison.percent(row.previousShare) + " → " + PeerComparison.percent(row.currentShare)
+                        + " · " + MonthComparison.signedWon(row.current - row.previous), 12, MUTED, false),
+                        new LinearLayout.LayoutParams(0, -2, 1));
+                double change = row.shareChange();
+                int color = change >= 3 ? UP : change <= -3 ? DOWN : MUTED;
+                line.addView(text(context, MonthComparison.pp(change), 12, color, true));
+                card.addView(line);
+            }
         }
-        card.addView(text(context, "※ 비율은 그 달 총지출 대비예요.", 12, MUTED, false));
+        card.addView(text(context, "※ 띠 길이는 그 달 총지출 대비 비율이에요.", 11, MUTED, false));
         return card;
     }
 
-    // ───────── 3. 또래와 소비 구성 비교 ─────────
+    // ───────── 또래와 비교 (띠그래프 + 설명) ─────────
 
     public static View genderPickerCard(Context context, OnGenderPicked onPicked) {
         LinearLayout card = AnalysisViews.card(context);
         card.addView(text(context, "또래와 비교하려면 성별을 골라주세요", 17, TEXT, true));
-        card.addView(text(context, "같은 성별·지역·연령대 사용자와 소비 구성을 비교해 드려요. 이 기기에만 저장돼요.", 13, MUTED, false));
+        card.addView(text(context, "같은 연령대·성별 사용자와 소비 구성을 비교해 드려요. 이 기기에만 저장돼요.", 13, MUTED, false));
 
         LinearLayout buttons = new LinearLayout(context);
         buttons.setPadding(0, dp(context, 10), 0, 0);
@@ -162,40 +156,29 @@ public final class ReportViews {
     public static View compositionCard(Context context, YearMonth month, PeerComparison.Result result, Runnable onChangeGender) {
         LinearLayout card = AnalysisViews.card(context);
         card.addView(text(context, AnalysisMonth.shortLabel(month) + " 또래와 소비 구성 비교", 17, TEXT, true));
-        card.addView(text(context, result.groupLabel + " " + result.peerCount + "명 평균과 비교했어요"
-                + (result.widened ? " (해당 그룹 인원이 적어 기준을 넓혔어요)" : ""), 13, MUTED, false));
-        card.addView(legend(context, "나", BLUE, "또래 평균", PEER_BAR));
+        card.addView(text(context, "수입을 어디에 어떤 비율로 썼는지 비교해요"
+                + (result.widened ? " (연령대 정보가 부족해 기준을 넓혔어요)" : ""), 13, MUTED, false));
+        card.addView(categoryLegend(context, true));
 
-        double max = 1.0;
-        for (String key : result.peer.shares.keySet())
-            max = Math.max(max, Math.max(result.mine.shares.get(key), result.peer.shares.get(key)));
-
-        for (String key : result.peer.shares.keySet()) {
-            double mine = result.mine.shares.get(key);
-            double peer = result.peer.shares.get(key);
-            LinearLayout block = new LinearLayout(context);
-            block.setOrientation(LinearLayout.VERTICAL);
-            block.setPadding(0, dp(context, 8), 0, dp(context, 2));
-
-            LinearLayout head = new LinearLayout(context);
-            head.setGravity(Gravity.CENTER_VERTICAL);
-            head.addView(dot(context, CategoryPalette.colorOf(key)), dotParams(context));
-            head.addView(text(context, key, 14, TEXT, true), new LinearLayout.LayoutParams(0, -2, 1));
-            head.addView(text(context, "나 " + PeerComparison.percent(mine) + " · 또래 " + PeerComparison.percent(peer), 12, MUTED, false));
-            block.addView(head);
-
-            block.addView(barRatio(context, (float) (mine / max), CategoryPalette.colorOf(key)));
-            block.addView(barRatio(context, (float) (peer / max), PEER_BAR));
-            card.addView(block);
+        String mineCaption = result.mine.empty ? "기록 없음" : "수입 " + MonthComparison.won(result.mine.income);
+        card.addView(bandRow(context, "나", mineCaption, segments(result.mine.amounts, true)));
+        for (PeerComparison.Group group : result.groups) {
+            card.addView(bandRow(context, group.title,
+                    group.detail + " " + group.count + "명 · 평균 수입 " + MonthComparison.won(group.composition.income),
+                    segments(group.composition.amounts, true)));
         }
 
-        card.addView(text(context, "※ 비율은 수입 대비예요 (수입보다 많이 쓴 달은 지출 대비). 또래는 테스트용 가상 사용자 기준이에요.", 12, MUTED, false));
+        LinearLayout explain = new LinearLayout(context);
+        explain.setOrientation(LinearLayout.VERTICAL);
+        explain.setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10));
+        explain.setBackground(rounded(context, 0xfff2f7f3, 14, 0xfff2f7f3));
+        explain.addView(text(context, "비교 설명", 14, GREEN_TEXT, true));
+        for (String line : result.feedback) explain.addView(text(context, "• " + line, 13, GREEN_TEXT, false));
+        LinearLayout.LayoutParams explainParams = new LinearLayout.LayoutParams(-1, -2);
+        explainParams.setMargins(0, dp(context, 12), 0, 0);
+        card.addView(explain, explainParams);
 
-        LinearLayout feedback = new LinearLayout(context);
-        feedback.setOrientation(LinearLayout.VERTICAL);
-        feedback.setPadding(0, dp(context, 8), 0, 0);
-        for (String line : result.feedback) feedback.addView(text(context, "• " + line, 14, GREEN_TEXT, false));
-        card.addView(feedback);
+        card.addView(text(context, "※ 띠 길이는 수입 대비 비율이에요 (수입보다 많이 쓴 달은 지출 대비). 비교 그룹은 테스트용 가상 사용자예요.", 11, MUTED, false));
 
         TextView change = text(context, "성별 다시 선택 ›", 13, 0xff597ab5, true);
         change.setOnClickListener(v -> onChangeGender.run());
@@ -205,36 +188,63 @@ public final class ReportViews {
 
     // ───────── 공통 조각 ─────────
 
-    private static View legend(Context context, String firstLabel, int firstColor, String secondLabel, int secondColor) {
-        LinearLayout row = new LinearLayout(context);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(context, 6), 0, 0);
-        row.addView(dot(context, firstColor), dotParams(context));
-        row.addView(text(context, firstLabel, 12, MUTED, false));
-        LinearLayout.LayoutParams gap = dotParams(context);
-        gap.setMargins(dp(context, 14), 0, dp(context, 6), 0);
-        row.addView(dot(context, secondColor), gap);
-        row.addView(text(context, secondLabel, 12, MUTED, false));
-        return row;
+    /** 이름·설명 한 줄 + 띠그래프 한 줄 */
+    private static View bandRow(Context context, String title, String caption, List<StackedBarView.Segment> segments) {
+        LinearLayout block = new LinearLayout(context);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(0, dp(context, 8), 0, dp(context, 2));
+
+        LinearLayout head = new LinearLayout(context);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(text(context, title, 14, TEXT, true), new LinearLayout.LayoutParams(-2, -2));
+        TextView sub = text(context, caption, 11, MUTED, false);
+        sub.setGravity(Gravity.END);
+        head.addView(sub, new LinearLayout.LayoutParams(0, -2, 1));
+        block.addView(head);
+
+        StackedBarView bar = new StackedBarView(context);
+        bar.setSegments(segments);
+        block.addView(bar, new LinearLayout.LayoutParams(-1, dp(context, 22)));
+        return block;
     }
 
-    private static View bar(Context context, long value, long max, int color) {
-        return barRatio(context, max <= 0L ? 0f : value / (float) max, color);
+    private static List<StackedBarView.Segment> segments(Map<String, Long> amounts, boolean withSaving) {
+        List<StackedBarView.Segment> list = new ArrayList<>();
+        if (withSaving) {
+            Long saving = amounts.get(CategoryPalette.SAVING);
+            list.add(new StackedBarView.Segment(saving == null ? 0L : saving, CategoryPalette.colorOf(CategoryPalette.SAVING)));
+        }
+        for (String category : CategoryPalette.EXPENSE_CATEGORIES) {
+            Long value = amounts.get(category);
+            list.add(new StackedBarView.Segment(value == null ? 0L : value, CategoryPalette.colorOf(category)));
+        }
+        return list;
     }
 
-    /** weightSum=1인 트랙 안에 비율만큼 weight를 준 막대 */
-    private static View barRatio(Context context, float fraction, int color) {
-        LinearLayout track = new LinearLayout(context);
-        track.setWeightSum(1f);
-        track.setBackground(rounded(context, 0xfff3f4f6, 4, 0xfff3f4f6));
-        View fill = new View(context);
-        fill.setBackground(rounded(context, color, 4, color));
-        float clamped = fraction <= 0f ? 0f : Math.max(0.01f, Math.min(1f, fraction));
-        track.addView(fill, new LinearLayout.LayoutParams(0, -1, clamped));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(context, 10));
-        params.setMargins(0, dp(context, 3), 0, 0);
-        track.setLayoutParams(params);
-        return track;
+    /** 색 범례 (한 줄에 3개씩) */
+    private static View categoryLegend(Context context, boolean withSaving) {
+        List<String> names = new ArrayList<>();
+        if (withSaving) names.add(CategoryPalette.SAVING);
+        Collections.addAll(names, CategoryPalette.EXPENSE_CATEGORIES);
+
+        LinearLayout box = new LinearLayout(context);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(0, dp(context, 6), 0, dp(context, 2));
+        LinearLayout row = null;
+        for (int i = 0; i < names.size(); i++) {
+            if (i % 3 == 0) {
+                row = new LinearLayout(context);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                box.addView(row);
+            }
+            LinearLayout item = new LinearLayout(context);
+            item.setGravity(Gravity.CENTER_VERTICAL);
+            item.addView(dot(context, CategoryPalette.colorOf(names.get(i))), dotParams(context));
+            item.addView(text(context, names.get(i), 12, MUTED, false));
+            row.addView(item, new LinearLayout.LayoutParams(0, -2, 1));
+        }
+        if (row != null) for (int i = names.size() % 3; i > 0 && i < 3; i++) row.addView(new View(context), new LinearLayout.LayoutParams(0, 1, 1));
+        return box;
     }
 
     private static View dot(Context context, int color) {
@@ -248,7 +258,7 @@ public final class ReportViews {
 
     private static LinearLayout.LayoutParams dotParams(Context context) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(context, 10), dp(context, 10));
-        params.setMargins(0, 0, dp(context, 8), 0);
+        params.setMargins(0, 0, dp(context, 6), 0);
         return params;
     }
 

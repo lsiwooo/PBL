@@ -92,6 +92,27 @@ public final class SupabaseRepository {
         preferences.edit().clear().apply();
     }
 
+    public void insertEntry(String transcript) throws Exception {
+        requireSession();
+        JSONObject item = new JSONObject()
+                .put("transcript", transcript)
+                .put("occurred_on", LocalDate.now().toString());
+        request("POST", "/rest/v1/voice_entries", item, accessToken(), "return=minimal");
+    }
+
+    public List<ScriptEntry> fetchEntries() throws Exception {
+        requireSession();
+        String query = "?select=transcript,created_at,occurred_on&order=occurred_on.desc,created_at.desc&limit=100";
+        String response = requestRaw("GET", "/rest/v1/voice_entries" + query, null, accessToken(), null);
+        JSONArray rows = new JSONArray(response);
+        List<ScriptEntry> entries = new ArrayList<>();
+        for (int index = 0; index < rows.length(); index++) {
+            JSONObject row = rows.getJSONObject(index);
+            entries.add(new ScriptEntry(row.optString("transcript"), row.optString("created_at"), row.optString("occurred_on")));
+        }
+        return entries;
+    }
+
     public void insertLedgerEntries(List<ParsedTransaction> transactions) throws Exception {
         requireSession();
         JSONArray items = new JSONArray();
@@ -106,6 +127,31 @@ public final class SupabaseRepository {
         }
         if (items.length() == 0) throw new Exception("저장할 가계부 항목이 없습니다.");
         requestRaw("POST", "/rest/v1/ledger_entries", items, accessToken(), "return=minimal");
+    }
+
+    /** 거래 날짜(occurredOn)를 반영하고 200건씩 나눠 저장합니다. */
+    public void insertLedgerEntriesBatch(List<ParsedTransaction> transactions) throws Exception {
+        requireSession();
+        String today = LocalDate.now().toString();
+        int total = 0;
+        JSONArray batch = new JSONArray();
+        for (ParsedTransaction transaction : transactions) {
+            // 문자·알림, 거래내역 파일에서 온 거래는 실제 거래 날짜로, 그 외에는 저장하는 날로 기록합니다.
+            String occurredOn = transaction.occurredOn() != null ? transaction.occurredOn() : today;
+            batch.put(new JSONObject()
+                    .put("item_name", transaction.itemName())
+                    .put("amount", transaction.amount())
+                    .put("transaction_type", transaction.transactionType())
+                    .put("category", transaction.category())
+                    .put("occurred_on", occurredOn));
+            total++;
+            if (batch.length() >= 200) { // 거래내역 파일처럼 건수가 많을 때는 나눠서 보냅니다.
+                requestRaw("POST", "/rest/v1/ledger_entries", batch, accessToken(), "return=minimal");
+                batch = new JSONArray();
+            }
+        }
+        if (total == 0) throw new Exception("저장할 가계부 항목이 없습니다.");
+        if (batch.length() > 0) requestRaw("POST", "/rest/v1/ledger_entries", batch, accessToken(), "return=minimal");
     }
 
     public List<LedgerEntry> fetchLedgerEntries() throws Exception {

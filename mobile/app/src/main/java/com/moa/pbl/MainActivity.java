@@ -81,6 +81,11 @@ public final class MainActivity extends ComponentActivity {
     private boolean recording;
     private final android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable recordingLimit = this::stopRecording;
+    private boolean resumedOnce = false;
+    // SharedPreferences는 리스너를 약하게만 붙잡으므로 필드로 들고 있어야 합니다.
+    private final android.content.SharedPreferences.OnSharedPreferenceChangeListener bankChangeListener = (prefs, key) -> {
+        if (BankSyncStore.isLogKey(key)) mainHandler.post(this::refreshLedgerEntries);
+    };
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -228,6 +233,7 @@ public final class MainActivity extends ComponentActivity {
 
     private void showRecordTab() {
         addText("자연어로 기록하기", 27, 0xff172642, false);
+        addButton("🏦  은행 문자·거래내역 자동 입력", v -> startActivity(new android.content.Intent(this, BankSyncActivity.class)));
         addText("말한 내용을 확인하고 가계부에 추가해요", 15, 0xff7e8798, false);
         addCardLabel("무엇을 사고 얼마를 썼는지 말해 주세요.", "인식된 문장을 확인하고 가계부에 추가할 수 있어요.");
         recordButton = new Button(this);
@@ -704,6 +710,11 @@ public final class MainActivity extends ComponentActivity {
         });
     }
 
+    private boolean canRerenderAfterRefresh() {
+        if (homeContent == null || recording || "record".equals(selectedTab)) return false;
+        return !("mypage".equals(selectedTab) && editingProfile); // 프로필 입력 중에는 건드리지 않음
+    }
+
     private void refreshLedgerEntries() {
         io.execute(() -> {
             try {
@@ -711,13 +722,13 @@ public final class MainActivity extends ComponentActivity {
                 runOnUiThread(() -> {
                     ledgerEntries = entries;
                     ledgerLoadError = "";
-                    if (homeContent != null && !recording && !"record".equals(selectedTab)) showTab(selectedTab);
+                    if (canRerenderAfterRefresh()) showTab(selectedTab);
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
                     ledgerEntries = new ArrayList<>();
                     ledgerLoadError = "거래 내역을 불러오지 못했어요. 네트워크 연결을 확인해 주세요.";
-                    if (homeContent != null && !recording && !"record".equals(selectedTab)) showTab(selectedTab);
+                    if (canRerenderAfterRefresh()) showTab(selectedTab);
                 });
             }
         });
@@ -744,6 +755,24 @@ public final class MainActivity extends ComponentActivity {
     private void addButton(String label, View.OnClickListener action) { Button button = new Button(this); button.setText(label); styleButton(button, 0xffdce8dc, 0xff254b37); button.setOnClickListener(action); LinearLayout.LayoutParams params = matchWrap(); params.setMargins(0, dp(6), 0, dp(8)); currentContent().addView(button, params); }
     private void showMessage(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
     private void setBusy(boolean busy) { if (status != null) status.setText(busy ? "처리 중…" : ""); }
+
+    /** 은행 자동 입력 화면에서 돌아오면 방금 저장된 거래가 바로 보이도록 다시 불러옵니다. */
+    @Override protected void onResume() {
+        super.onResume();
+        if (resumedOnce) refreshLedgerEntries();
+        resumedOnce = true;
+    }
+
+    /** 화면이 켜져 있는 동안 알림으로 거래가 자동 저장되면 바로 다시 불러옵니다. */
+    @Override protected void onStart() {
+        super.onStart();
+        BankSyncStore.registerChangeListener(this, bankChangeListener);
+    }
+
+    @Override protected void onStop() {
+        BankSyncStore.unregisterChangeListener(this, bankChangeListener);
+        super.onStop();
+    }
 
     @Override protected void onDestroy() {
         mainHandler.removeCallbacks(recordingLimit);

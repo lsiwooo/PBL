@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.transcriptions import router as transcriptions_router
 from app.routers.ledger import router as ledger_router
+from app.routers.ledger_import import router as ledger_import_router
 
 app = FastAPI(title="Moa Voice Transcription API", version="1.0.0")
 app.add_middleware(
@@ -13,6 +14,7 @@ app.add_middleware(
 )
 app.include_router(transcriptions_router)
 app.include_router(ledger_router)
+app.include_router(ledger_import_router)
 
 
 @app.get("/health")

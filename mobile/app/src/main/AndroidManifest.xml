@@ -3,8 +3,6 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:allowBackup="false"
-        android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher"
         android:label="자연어 가계부"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
@@ -18,5 +16,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 은행 자동 입력 화면 -->
+        <activity
+            android:name=".BankSyncActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 은행 푸시·문자 알림 읽기 (설정 > 알림 접근 권한에서 사용자가 직접 켜야 동작) -->
+        <service
+            android:name=".BankNotificationListener"
+            android:exported="true"
+            android:label="자연어 가계부 알림 읽기"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

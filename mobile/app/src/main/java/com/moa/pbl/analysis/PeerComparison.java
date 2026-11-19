@@ -115,26 +115,16 @@ public final class PeerComparison {
         boolean hasRegion = region != null && !region.isEmpty();
         String band = hasAge ? ageBandLabel(age) : "";
 
-        // 주 비교 그룹은 입력된 정보만 사용한다. 성별이 없어도 연령·지역 기준 비교를 계속한다.
+        // 주 비교 그룹: 같은 연령대·성별 → 부족하면 같은 성별 → 전체
         List<PeerDataGenerator.PeerRecord> main = hasAge ? filter(dataset, gender, null, age) : new ArrayList<>();
-        String mainTitle = gender == null ? "같은 연령대" : "같은 연령대·성별";
-        String mainDetail = band + (gender == null ? "" : " " + gender);
+        String mainTitle = "같은 연령대·성별";
+        String mainDetail = band + " " + gender;
         boolean widened = false;
         if (main.size() < MIN_GROUP_SIZE) {
             widened = true;
-            if (gender != null) {
-                main = filter(dataset, gender, null, -1);
-                mainTitle = "같은 성별";
-                mainDetail = gender + " 전체";
-            } else if (hasRegion) {
-                main = filter(dataset, null, region, -1);
-                mainTitle = "같은 지역";
-                mainDetail = region + " 전체";
-            } else {
-                main = new ArrayList<>(dataset);
-                mainTitle = "전체 사용자";
-                mainDetail = "전체";
-            }
+            main = filter(dataset, gender, null, -1);
+            mainTitle = "같은 성별";
+            mainDetail = gender + " 전체";
         }
         if (main.size() < MIN_GROUP_SIZE) {
             main = new ArrayList<>(dataset);

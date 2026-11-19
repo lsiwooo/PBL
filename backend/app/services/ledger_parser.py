@@ -6,12 +6,10 @@ advisor_v3.py 의 프롬프트 규칙, 카테고리 분류, 재시도/모델 전
 """
 import asyncio
 import logging
-from datetime import date
-from typing import Literal, TypedDict
+from typing import Literal
 
 from google import genai
 from google.genai import types
-from google.genai.client import AsyncClient
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
@@ -25,8 +23,8 @@ MAX_ATTEMPTS = 3        # 모델 하나당 시도 횟수
 PER_CALL_TIMEOUT = 15   # Gemini 한 번 호출을 기다리는 최대 시간(초). 정상이면 보통 2~6초
 TOTAL_BUDGET = 50       # 전체 최대 시간(초). 앱의 응답 대기(60초)보다 짧게 잡아 앱이 먼저 포기하지 않게 함
 
-SYSTEM_PROMPT = f"""당신은 한국어 가계부 입력 분석기입니다.
-사용자 문장 또는 영수증 이미지에서 '명시된' 수입 또는 지출 항목만 추출하세요.
+SYSTEM_PROMPT = f"""당신은 한국어 가계부 문장 분석기입니다.
+사용자 문장에서 '명시된' 수입 또는 지출 항목만 추출하세요.
 
 규칙:
 - transaction_type 은 expense(돈을 씀) 또는 income(돈을 받음) 중 하나입니다.
@@ -47,7 +45,6 @@ class LedgerTransaction(BaseModel):
     amount: int = Field(description="원 단위 양의 정수 금액")
     transaction_type: Literal["expense", "income"]
     category: str = Field(description="식비, 카페, 교통, 쇼핑, 생활, 의료, 문화, 교육, 급여, 용돈, 기타 중 하나")
-    occurred_on: str | None = Field(default=None, description="영수증에 거래 날짜가 명확히 표시되면 YYYY-MM-DD, 아니면 null")
 
 
 class LedgerParseResult(BaseModel):
@@ -55,14 +52,6 @@ class LedgerParseResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     transactions: list[LedgerTransaction]
-
-
-class LedgerTransactionRecord(TypedDict):
-    item_name: str
-    amount: int
-    transaction_type: Literal["expense", "income"]
-    category: str
-    occurred_on: str | None
 
 
 def _is_transient(error: Exception) -> bool:
@@ -83,10 +72,7 @@ def _model_candidates() -> list[str]:
     return models
 
 
-async def _generate_with_fallback(
-    async_client: AsyncClient,
-    contents: types.ContentListUnion,
-) -> types.GenerateContentResponse:
+async def _generate_with_fallback(async_client, transcript: str):
     """모델이 바쁘면(503/429) 잠깐 기다렸다 재시도하고, 응답이 멈추면(시간 초과) 바로 다음 모델로 넘어갑니다.
 
     전체 대기 시간은 TOTAL_BUDGET 을 넘기지 않아서, 앱이 timeout 으로 끊기기 전에
@@ -106,7 +92,7 @@ async def _generate_with_fallback(
                 response = await asyncio.wait_for(
                     async_client.models.generate_content(
                         model=model,
-                        contents=contents,
+                        contents=transcript,
                         config=types.GenerateContentConfig(
                             system_instruction=SYSTEM_PROMPT,
                             response_mime_type="application/json",
@@ -134,7 +120,7 @@ async def _generate_with_fallback(
     raise last_error
 
 
-async def parse_ledger_text(transcript: str) -> list[LedgerTransactionRecord]:
+async def parse_ledger_text(transcript: str) -> list[dict]:
     if not settings.gemini_api_key:
         raise RuntimeError("Gemini API 키 설정이 필요해요. backend/.env를 확인해 주세요.")
 
@@ -142,47 +128,18 @@ async def parse_ledger_text(transcript: str) -> list[LedgerTransactionRecord]:
     async_client = client.aio
     try:
         response = await _generate_with_fallback(async_client, transcript)
-        return _transactions_from_response(response)
+        if not response.text:
+            return []
+        result = LedgerParseResult.model_validate_json(response.text)
+        return [
+            {
+                "item_name": item.item_name.strip()[:120],
+                "amount": item.amount,
+                "transaction_type": item.transaction_type,
+                "category": item.category if item.category in CATEGORIES else "기타",
+            }
+            for item in result.transactions
+            if item.item_name.strip() and item.amount > 0
+        ]
     finally:
         await async_client.aclose()
-
-
-async def parse_ledger_image(image_data: bytes, mime_type: str) -> list[LedgerTransactionRecord]:
-    if not settings.gemini_api_key:
-        raise RuntimeError("Gemini API 키 설정이 필요해요. backend/.env를 확인해 주세요.")
-
-    client = genai.Client(api_key=settings.gemini_api_key)
-    async_client = client.aio
-    prompt = "영수증에서 품목명, 결제 금액, 거래 유형, 카테고리와 표시된 거래 날짜를 읽어 거래별로 추출하세요. 날짜가 명확히 보이면 YYYY-MM-DD로 반환하고, 없으면 null로 두세요. 일반 매장 영수증은 지출(expense)로 분류하세요. 품목별 금액이 있으면 품목별로 한 건씩 기록하고 영수증 합계는 중복으로 추가하지 마세요. 품목별 금액이 없으면 결제 합계 한 건만 기록하세요. 부가세, 할인, 포인트, 거스름돈은 별도 거래로 기록하지 마세요. 이미지에 없는 정보는 추측하지 마세요."
-    try:
-        image_part = types.Part.from_bytes(data=image_data, mime_type=mime_type)
-        response = await _generate_with_fallback(async_client, [prompt, image_part])
-        return _transactions_from_response(response)
-    finally:
-        await async_client.aclose()
-
-
-def _transactions_from_response(response: types.GenerateContentResponse) -> list[LedgerTransactionRecord]:
-    if not response.text:
-        return []
-    result = LedgerParseResult.model_validate_json(response.text)
-    return [
-        {
-            "item_name": item.item_name.strip()[:120],
-            "amount": item.amount,
-            "transaction_type": item.transaction_type,
-            "category": item.category if item.category in CATEGORIES else "기타",
-            "occurred_on": _valid_date(item.occurred_on),
-        }
-        for item in result.transactions
-        if item.item_name.strip() and item.amount > 0
-    ]
-
-
-def _valid_date(value: str | None) -> str | None:
-    if value is None:
-        return None
-    try:
-        return date.fromisoformat(value).isoformat()
-    except ValueError:
-        return None

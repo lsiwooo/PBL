@@ -31,7 +31,6 @@ public final class ProfileFormView extends LinearLayout {
     private static final int BORDER = 0xffdfe5dc;
 
     private final Button birthDateButton;
-    private final Spinner genderSpinner;
     private final Spinner occupationSpinner;
     private final TextView schoolLabel;
     private final Spinner schoolSpinner;
@@ -54,9 +53,6 @@ public final class ProfileFormView extends LinearLayout {
         addView(birthDateButton, new LayoutParams(-1, dp(48)));
         birthDateButton.setOnClickListener(v -> showDatePicker());
 
-        label("성별");
-        genderSpinner = spinner(withPrompt(Arrays.asList(GenderPreference.MALE, GenderPreference.FEMALE)));
-
         label("직업");
         occupationSpinner = spinner(withPrompt(Arrays.asList(ConsumptionProfile.OCCUPATIONS)));
 
@@ -77,7 +73,7 @@ public final class ProfileFormView extends LinearLayout {
         regionSpinner = spinner(withPrompt(Arrays.asList(ConsumptionProfile.REGIONS)));
 
         TextView note = AnalysisViews.text(context,
-                "입력한 정보는 소비 피드백과 또래 비교에 사용돼요.", 13, 0xff7e8798, false);
+                "프로필 입력은 선택 사항이에요.", 13, 0xff7e8798, false);
         note.setPadding(0, dp(10), 0, 0);
         addView(note);
 
@@ -95,7 +91,6 @@ public final class ProfileFormView extends LinearLayout {
         if (initial != null) {
             birthDate = initial.birthDate;
             birthDateButton.setText(birthDate.toString());
-            setSelection(genderSpinner, initial.gender);
             setSelection(occupationSpinner, initial.occupation);
             updateStudentFields();
             if (ConsumptionProfile.STUDENT.equals(initial.occupation)) {
@@ -128,9 +123,8 @@ public final class ProfileFormView extends LinearLayout {
         }
         int occupationPosition = occupationSpinner.getSelectedItemPosition();
         int regionPosition = regionSpinner.getSelectedItemPosition();
-        int genderPosition = genderSpinner.getSelectedItemPosition();
-        if (genderPosition == 0 || occupationPosition == 0 || regionPosition == 0) {
-            Toast.makeText(getContext(), "성별, 직업과 시·도를 입력해 주세요.", Toast.LENGTH_SHORT).show();
+        if (occupationPosition == 0 || regionPosition == 0) {
+            Toast.makeText(getContext(), "직업과 시·도를 선택해 주세요.", Toast.LENGTH_SHORT).show();
             return;
         }
         String occupation = ConsumptionProfile.OCCUPATIONS[occupationPosition - 1];
@@ -149,8 +143,7 @@ public final class ProfileFormView extends LinearLayout {
             grade = gradePosition;
         }
         String region = ConsumptionProfile.REGIONS[regionPosition - 1];
-        String gender = genderSpinner.getSelectedItem().toString();
-        onSaved.onSaved(new ConsumptionProfile(birthDate, gender, occupation, schoolType, schoolName, grade, region));
+        onSaved.onSaved(new ConsumptionProfile(birthDate, occupation, schoolType, schoolName, grade, region));
     }
 
     private void showDatePicker() {

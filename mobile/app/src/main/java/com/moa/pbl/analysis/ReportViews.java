@@ -17,6 +17,10 @@ import java.util.Map;
 /** 소비 화면의 카드들. 화면 코드만 있고 계산은 PeerComparison·MonthComparison이 한다. */
 public final class ReportViews {
 
+    public interface OnGenderPicked {
+        void onPicked(String gender);
+    }
+
     private static final int TEXT = 0xff172642;
     private static final int MUTED = 0xff7e8798;
     private static final int GREEN_TEXT = 0xff294a37;
@@ -128,7 +132,28 @@ public final class ReportViews {
 
     // ───────── 또래와 비교 (띠그래프 + 설명) ─────────
 
-    public static View compositionCard(Context context, YearMonth month, PeerComparison.Result result) {
+    public static View genderPickerCard(Context context, OnGenderPicked onPicked) {
+        LinearLayout card = AnalysisViews.card(context);
+        card.addView(text(context, "또래와 비교하려면 성별을 골라주세요", 17, TEXT, true));
+        card.addView(text(context, "같은 연령대·성별 사용자와 소비 구성을 비교해 드려요. 이 기기에만 저장돼요.", 13, MUTED, false));
+
+        LinearLayout buttons = new LinearLayout(context);
+        buttons.setPadding(0, dp(context, 10), 0, 0);
+        for (String gender : new String[]{GenderPreference.MALE, GenderPreference.FEMALE}) {
+            TextView chip = text(context, gender, 15, BLUE, true);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(0, dp(context, 12), 0, dp(context, 12));
+            chip.setBackground(rounded(context, 0xffeaf0fb, 14, 0xffeaf0fb));
+            chip.setOnClickListener(v -> onPicked.onPicked(gender));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -2, 1);
+            params.setMargins(dp(context, 4), 0, dp(context, 4), 0);
+            buttons.addView(chip, params);
+        }
+        card.addView(buttons);
+        return card;
+    }
+
+    public static View compositionCard(Context context, YearMonth month, PeerComparison.Result result, Runnable onChangeGender) {
         LinearLayout card = AnalysisViews.card(context);
         card.addView(text(context, AnalysisMonth.shortLabel(month) + " 또래와 소비 구성 비교", 17, TEXT, true));
         card.addView(text(context, "수입을 어디에 어떤 비율로 썼는지 비교해요"
@@ -155,6 +180,9 @@ public final class ReportViews {
 
         card.addView(text(context, "※ 띠 길이는 수입 대비 비율이에요 (수입보다 많이 쓴 달은 지출 대비). 비교 그룹은 테스트용 가상 사용자예요.", 11, MUTED, false));
 
+        TextView change = text(context, "성별 다시 선택 ›", 13, 0xff597ab5, true);
+        change.setOnClickListener(v -> onChangeGender.run());
+        card.addView(change);
         return card;
     }
 

@@ -3,10 +3,7 @@ package com.moa.pbl.analysis;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-/**
- * 또래 비교용 성별을 계정별로 기기에 저장한다.
- * 프로필(ConsumptionProfile)에 성별 항목이 생기면 그 값을 쓰도록 바꾸고 이 클래스는 지운다.
- */
+/** 기존 기기 저장 성별을 프로필 DB 컬럼으로 한 번 옮길 때 사용합니다. */
 public final class GenderPreference {
 
     public static final String MALE = "남성";

@@ -13,7 +13,11 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.net.URLEncoder;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import org.json.JSONArray;
@@ -33,6 +37,54 @@ public final class SupabaseRepository {
 
     public boolean isConfigured() { return !baseUrl.isEmpty() && !apiKey.isEmpty(); }
     public boolean hasSession() { return !preferences.getString("access_token", "").isEmpty(); }
+
+    public String createOAuthAuthorizationUrl(String provider, String redirectUri) throws Exception {
+        requireConfigured();
+        if (!"google".equals(provider) && !"custom:naver".equals(provider))
+            throw new Exception("지원하지 않는 로그인 방식입니다.");
+
+        byte[] random = new byte[32];
+        new SecureRandom().nextBytes(random);
+        String verifier = Base64.getUrlEncoder().withoutPadding().encodeToString(random);
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII));
+        String challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        preferences.edit().putString("oauth_code_verifier", verifier).apply();
+
+        return baseUrl + "/auth/v1/authorize?provider=" + urlEncode(provider)
+                + "&redirect_to=" + urlEncode(redirectUri)
+                + "&code_challenge=" + urlEncode(challenge)
+                + "&code_challenge_method=s256";
+    }
+
+    public void completeOAuthAuthorization(String authorizationCode) throws Exception {
+        requireConfigured();
+        String verifier = preferences.getString("oauth_code_verifier", "");
+        if (verifier.isEmpty()) throw new Exception("로그인 정보가 만료됐어요. 다시 로그인해 주세요.");
+        try {
+            JSONObject body = new JSONObject()
+                    .put("auth_code", authorizationCode)
+                    .put("code_verifier", verifier);
+            JSONObject result = request("POST", "/auth/v1/token?grant_type=pkce", body, null, null);
+            String accessToken = result.optString("access_token");
+            String refreshToken = result.optString("refresh_token");
+            if (accessToken.isEmpty() || refreshToken.isEmpty())
+                throw new Exception("로그인 정보를 받지 못했어요. 다시 시도해 주세요.");
+            JSONObject user = result.optJSONObject("user");
+            String email = user == null ? "" : user.optString("email", "");
+            preferences.edit().putString("access_token", accessToken)
+                    .putString("refresh_token", refreshToken)
+                    .putString("account_email", email)
+                    .putLong("expires_at", System.currentTimeMillis() / 1000L + result.optLong("expires_in", 3600L))
+                    .remove("oauth_code_verifier").apply();
+        } catch (Exception error) {
+            preferences.edit().remove("oauth_code_verifier").apply();
+            throw error;
+        }
+    }
+
+    private String urlEncode(String value) throws Exception {
+        return URLEncoder.encode(value, "UTF-8");
+    }
 
     public void authenticate(String email, String password, boolean signup) throws Exception {
         requireConfigured();
@@ -56,12 +108,13 @@ public final class SupabaseRepository {
 
     public ConsumptionProfile fetchConsumptionProfile() throws Exception {
         requireSession();
-        String path = "/rest/v1/consumption_profiles?select=birth_date,occupation,school_type,school_name,grade,region&limit=1";
+        String path = "/rest/v1/consumption_profiles?select=birth_date,gender,occupation,school_type,school_name,grade,region&limit=1";
         JSONArray rows = new JSONArray(requestRaw("GET", path, null, accessToken(), null));
         if (rows.length() == 0) return null;
         JSONObject row = rows.getJSONObject(0);
         return new ConsumptionProfile(
                 LocalDate.parse(row.getString("birth_date")),
+                row.isNull("gender") ? "" : row.getString("gender"),
                 row.getString("occupation"),
                 row.optString("school_type", ""),
                 row.optString("school_name", ""),
@@ -74,6 +127,7 @@ public final class SupabaseRepository {
         requireSession();
         JSONObject row = new JSONObject()
                 .put("birth_date", profile.birthDate.toString())
+                .put("gender", profile.gender.isEmpty() ? JSONObject.NULL : profile.gender)
                 .put("occupation", profile.occupation)
                 .put("school_type", profile.schoolType.isEmpty() ? JSONObject.NULL : profile.schoolType)
                 .put("school_name", profile.schoolName.isEmpty() ? JSONObject.NULL : profile.schoolName)
@@ -116,14 +170,14 @@ public final class SupabaseRepository {
     public void insertLedgerEntries(List<ParsedTransaction> transactions) throws Exception {
         requireSession();
         JSONArray items = new JSONArray();
-        String occurredOn = LocalDate.now().toString();
+        String today = LocalDate.now().toString();
         for (ParsedTransaction transaction : transactions) {
             items.put(new JSONObject()
                     .put("item_name", transaction.itemName())
                     .put("amount", transaction.amount())
                     .put("transaction_type", transaction.transactionType())
                     .put("category", transaction.category())
-                    .put("occurred_on", occurredOn));
+                    .put("occurred_on", transaction.occurredOn() == null ? today : transaction.occurredOn()));
         }
         if (items.length() == 0) throw new Exception("저장할 가계부 항목이 없습니다.");
         requestRaw("POST", "/rest/v1/ledger_entries", items, accessToken(), "return=minimal");

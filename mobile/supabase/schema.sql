@@ -33,6 +33,7 @@ create policy "Users can create their own ledger entries"
 create table if not exists public.consumption_profiles (
     user_id uuid primary key default auth.uid() references auth.users(id) on delete cascade,
     birth_date date not null check (birth_date <= current_date),
+    gender text check (gender in ('남성', '여성')),
     occupation text not null check (occupation in ('학생', '직장인', '자영업자', '프리랜서', '구직 중', '기타')),
     school_type text,
     school_name text,
@@ -46,6 +47,12 @@ create table if not exists public.consumption_profiles (
         or (occupation <> '학생' and school_type is null and school_name is null and grade is null)
     )
 );
+
+-- 기존 프로필 테이블에도 성별 컬럼을 추가합니다. 기존 사용자 데이터는 유지합니다.
+alter table public.consumption_profiles add column if not exists gender text;
+alter table public.consumption_profiles drop constraint if exists consumption_profiles_gender_check;
+alter table public.consumption_profiles add constraint consumption_profiles_gender_check
+    check (gender is null or gender in ('남성', '여성'));
 
 alter table public.consumption_profiles enable row level security;
 revoke all on table public.consumption_profiles from anon, authenticated;

@@ -1,5 +1,6 @@
 package com.moa.pbl;
 
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.database.Cursor;
@@ -9,6 +10,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
+import android.text.InputType;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -22,6 +24,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.app.NotificationManagerCompat;
 import com.moa.pbl.data.LedgerImportRepository;
 import com.moa.pbl.data.LedgerImportRepository.ImportResult;
+import com.moa.pbl.data.LedgerImportRepository.PasswordRequiredException;
 import com.moa.pbl.data.ParsedTransaction;
 import com.moa.pbl.data.SupabaseRepository;
 import java.io.ByteArrayOutputStream;
@@ -88,8 +91,9 @@ public final class BankSyncActivity extends ComponentActivity {
         // ---- 2. 거래내역 파일 가져오기
         LinearLayout fileCard = card(root);
         fileCard.addView(text("거래내역 파일 가져오기", 18, 0xff172642, true), wrap());
-        fileCard.addView(text("은행 앱에서 내려받은 거래내역 파일(엑셀 .xlsx, CSV)을 올리면 지난 거래와 현재 잔고를 한 번에 채워요. "
-                + "카드 가승인(임시 승인)은 수입·지출로 세지 않아요.", 13, 0xff454d45, false), wrap());
+        fileCard.addView(text("은행 앱에서 내려받은 거래내역 파일(엑셀 .xlsx, CSV, PDF)을 올리면 지난 거래와 현재 잔고를 한 번에 채워요. "
+                + "비밀번호가 걸린 파일은 비밀번호를 물어봐요. 카드 가승인(임시 승인)은 수입·지출로 세지 않아요. "
+                + "PDF는 AI가 읽기 때문에 결과를 꼭 확인해 주세요.", 13, 0xff454d45, false), wrap());
         accountInput = new EditText(this);
         accountInput.setSingleLine(true);
         accountInput.setHint("계좌 이름 (예: 토스뱅크)");
@@ -161,16 +165,8 @@ public final class BankSyncActivity extends ComponentActivity {
         } else {
             StringBuilder builder = new StringBuilder();
             SimpleDateFormat format = new SimpleDateFormat("M/d HH:mm", Locale.KOREA);
-            long total = 0;
             for (BankSyncStore.Balance balance : balances) {
-                total += balance.balance;
-            }
-            // 모든 계좌 잔액을 합친 총 잔고
-            builder.append("총 잔고   ").append(won(total));
-            if (balances.size() > 1) builder.append("   (계좌 ").append(balances.size()).append("개 합계)");
-            builder.append("\n");
-            for (BankSyncStore.Balance balance : balances) {
-                builder.append('\n');
+                if (builder.length() > 0) builder.append('\n');
                 builder.append(balance.account).append("   ").append(won(balance.balance))
                         .append("   (").append(format.format(new Date(balance.asOfMillis))).append(" 기준)");
             }
@@ -208,19 +204,66 @@ public final class BankSyncActivity extends ComponentActivity {
         if (uri == null) return;
         pendingImport = null;
         saveImportButton.setVisibility(View.GONE);
-        importSummary.setText("파일을 분석하는 중이에요… (처음엔 서버 응답에 시간이 걸릴 수 있어요)");
+        importSummary.setText("파일을 읽는 중이에요…");
         io.execute(() -> {
             try {
                 String extension = extensionOf(displayName(uri));
                 byte[] bytes = readAll(uri);
-                ImportResult result = new LedgerImportRepository().upload(extension, bytes);
-                runOnUiThread(() -> showPreview(result));
+                uploadFile(extension, bytes, null);
             } catch (Exception error) {
-                final String message = error.getMessage() == null ? "알 수 없는 오류" : error.getMessage();
-                runOnUiThread(() -> importSummary.setText("파일을 가져오지 못했어요: " + message
-                        + "\n(서버가 켜져 있는지, 폰과 서버가 같은 네트워크인지도 확인해 주세요.)"));
+                showImportError(error);
             }
         });
+    }
+
+    /** 서버에 올려 분석합니다. 비밀번호가 필요하면 입력창을 띄우고, 입력하면 같은 파일로 다시 올립니다. */
+    private void uploadFile(String extension, byte[] bytes, String password) {
+        runOnUiThread(() -> importSummary.setText(".pdf".equals(extension)
+                ? "PDF를 AI가 읽는 중이에요… 1분 가까이 걸릴 수 있어요."
+                : "파일을 분석하는 중이에요… (처음엔 서버 응답에 시간이 걸릴 수 있어요)"));
+        io.execute(() -> {
+            try {
+                ImportResult result = new LedgerImportRepository().upload(extension, bytes, password);
+                runOnUiThread(() -> showPreview(result));
+            } catch (PasswordRequiredException needPassword) {
+                runOnUiThread(() -> askPassword(extension, bytes, needPassword.wrongPassword));
+            } catch (Exception error) {
+                showImportError(error);
+            }
+        });
+    }
+
+    private void showImportError(Exception error) {
+        final String message = error.getMessage() == null ? "알 수 없는 오류" : error.getMessage();
+        runOnUiThread(() -> importSummary.setText("파일을 가져오지 못했어요: " + message
+                + "\n(서버가 켜져 있는지, 폰과 서버가 같은 네트워크인지도 확인해 주세요.)"));
+    }
+
+    /** 비밀번호 입력창. 입력한 비밀번호는 화면과 서버 요청에만 쓰고 어디에도 저장하지 않습니다. */
+    private void askPassword(String extension, byte[] bytes, boolean wrongPassword) {
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("비밀번호");
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setPadding(dp(16), dp(12), dp(16), dp(12));
+        String message = wrongPassword
+                ? "비밀번호가 맞지 않아요. 다시 입력해 주세요."
+                : "비밀번호가 걸린 파일이에요. 비밀번호를 입력하면 파일을 열어 거래내역을 가져와요.\n(비밀번호는 저장하지 않고, 파일을 여는 데에만 한 번 쓰여요.)";
+        importSummary.setText("비밀번호를 기다리는 중이에요…");
+        new AlertDialog.Builder(this)
+                .setTitle("비밀번호가 필요해요")
+                .setMessage(message)
+                .setView(input)
+                .setPositiveButton("열기", (dialog, which) -> {
+                    String password = input.getText() == null ? "" : input.getText().toString();
+                    if (password.isEmpty()) {
+                        askPassword(extension, bytes, false);
+                    } else {
+                        uploadFile(extension, bytes, password);
+                    }
+                })
+                .setNegativeButton("취소", (dialog, which) -> importSummary.setText("가져오기를 취소했어요."))
+                .show();
     }
 
     private void showPreview(ImportResult result) {
@@ -252,6 +295,7 @@ public final class BankSyncActivity extends ComponentActivity {
         }
 
         StringBuilder builder = new StringBuilder();
+        if (result.notice != null) builder.append("⚠️ ").append(result.notice).append("\n\n");
         builder.append("거래 ").append(result.transactions.size()).append("건")
                 .append("  (수입 ").append(incomeCount).append("건 ").append(won(incomeSum))
                 .append(" / 지출 ").append(expenseCount).append("건 ").append(won(expenseSum)).append(")");
@@ -323,6 +367,7 @@ public final class BankSyncActivity extends ComponentActivity {
 
     private static String extensionOf(String name) {
         String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".pdf")) return ".pdf";
         if (lower.endsWith(".xlsx")) return ".xlsx";
         if (lower.endsWith(".xls")) return ".xls";
         if (lower.endsWith(".csv")) return ".csv";

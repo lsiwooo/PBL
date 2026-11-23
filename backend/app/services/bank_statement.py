@@ -401,6 +401,11 @@ def parse_statement(filename: str, data: bytes) -> StatementResult:
         elif status == "ok" and item is not None:
             parsed.append(item)
 
+    return build_result(parsed, invalid)
+
+
+def build_result(parsed: list[ParsedRow], invalid: int) -> StatementResult:
+    """읽어낸 행 목록을 가계부 거래 목록과 최근 잔고로 정리합니다. (파일/PDF 공통)"""
     if not parsed:
         raise StatementError("거래 내역을 찾지 못했어요. 거래일시, 금액, 잔액 같은 열이 있는 거래내역 파일인지 확인해 주세요.")
 
@@ -431,3 +436,6 @@ def parse_statement(filename: str, data: bytes) -> StatementResult:
             "occurred_at": row.occurred_at.isoformat(timespec="seconds"),
         })
     return result
+
+
+finish_row = _finish  # 다른 모듈(PDF)에서 같은 규칙으로 행을 만들 때 사용

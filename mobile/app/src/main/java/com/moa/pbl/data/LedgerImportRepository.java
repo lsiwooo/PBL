@@ -23,18 +23,36 @@ public final class LedgerImportRepository {
         public int skippedHolds;             // 가승인으로 제외한 건수
         public int skippedInvalid;           // 읽지 못해 제외한 건수
         public int totalRows;
+        public String notice;                // 화면에 함께 보여줄 안내 (예: PDF는 AI가 읽은 결과)
+    }
+
+    /** 비밀번호가 걸린 파일일 때 서버가 알려주는 신호. wrongPassword 가 true 면 입력한 비밀번호가 틀린 경우 */
+    public static final class PasswordRequiredException extends Exception {
+        public final boolean wrongPassword;
+
+        public PasswordRequiredException(boolean wrongPassword, String message) {
+            super(message);
+            this.wrongPassword = wrongPassword;
+        }
     }
 
     private final String baseUrl = BuildConfig.TRANSCRIPTION_API_BASE_URL.replaceAll("/+$", "");
 
-    /** extension: ".csv", ".xlsx" 등 (파일 이름은 한글이 깨질 수 있어 확장자만 보냅니다) */
     public ImportResult upload(String extension, byte[] fileBytes) throws Exception {
+        return upload(extension, fileBytes, null);
+    }
+
+    /**
+     * extension: ".csv", ".xlsx", ".pdf" 등 (파일 이름은 한글이 깨질 수 있어 확장자만 보냅니다)
+     * password: 비밀번호가 걸린 파일일 때만 넣습니다. (저장하지 않고 이 요청에만 사용)
+     */
+    public ImportResult upload(String extension, byte[] fileBytes, String password) throws Exception {
         String boundary = "----MoaBoundary" + System.currentTimeMillis();
         HttpURLConnection connection = (HttpURLConnection) new URL(baseUrl + "/api/v1/ledger/import").openConnection();
         try {
             connection.setRequestMethod("POST");
             connection.setConnectTimeout(15_000);
-            connection.setReadTimeout(120_000);
+            connection.setReadTimeout(150_000); // PDF는 AI가 읽느라 오래 걸릴 수 있어요
             connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
             connection.setRequestProperty("Accept", "application/json");
@@ -46,14 +64,35 @@ public final class LedgerImportRepository {
             try (OutputStream output = connection.getOutputStream()) {
                 output.write(head.getBytes(StandardCharsets.UTF_8));
                 output.write(fileBytes);
+                if (password != null && !password.isEmpty()) {
+                    String passwordPart = "\r\n--" + boundary + "\r\n"
+                            + "Content-Disposition: form-data; name=\"password\"\r\n\r\n";
+                    output.write(passwordPart.getBytes(StandardCharsets.UTF_8));
+                    output.write(password.getBytes(StandardCharsets.UTF_8));
+                }
                 output.write(tail.getBytes(StandardCharsets.UTF_8));
             }
 
             int code = connection.getResponseCode();
             InputStream stream = code >= 200 && code < 300 ? connection.getInputStream() : connection.getErrorStream();
             String response = stream == null ? "{}" : readAll(stream);
-            JSONObject json = new JSONObject(response);
+            JSONObject json;
+            try {
+                json = new JSONObject(response);
+            } catch (Exception notJson) {
+                throw new Exception("서버 응답을 읽지 못했어요. (HTTP " + code + ")");
+            }
             if (code < 200 || code >= 300) {
+                Object detail = json.opt("detail");
+                if (detail instanceof JSONObject) {
+                    JSONObject info = (JSONObject) detail;
+                    String errorCode = info.optString("code", "");
+                    String message = info.optString("message", "거래내역 파일을 읽지 못했어요.");
+                    if (errorCode.startsWith("password")) {
+                        throw new PasswordRequiredException("password_invalid".equals(errorCode), message);
+                    }
+                    throw new Exception(message);
+                }
                 throw new Exception(json.optString("detail", "거래내역 파일을 읽지 못했어요."));
             }
 
@@ -79,6 +118,7 @@ public final class LedgerImportRepository {
             result.skippedHolds = json.optInt("skipped_holds", 0);
             result.skippedInvalid = json.optInt("skipped_invalid", 0);
             result.totalRows = json.optInt("total_rows", 0);
+            result.notice = json.isNull("notice") ? null : json.optString("notice");
             return result;
         } finally {
             connection.disconnect();
